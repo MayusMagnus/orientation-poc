@@ -2,7 +2,7 @@
 //
 // Agent "backend" exécuté dans le navigateur.
 // Appelle Chat Completions avec response_format=json_object.
-// La clé API et le modèle viennent du module state ci-dessous.
+// La clé API et le modèle viennent d'une modale côté UI (app.js).
 
 window.Agent = (function () {
   let OPENAI_API_KEY = null;
@@ -62,16 +62,20 @@ window.Agent = (function () {
     }
   }
 
-  // --- Schémas (guidage via prompt) ---
+  // ---------- Schémas JSON (guidage via prompt) ----------
+
+  // ⬇️ Ajouts: answered + missing_points pour rendre la décision explicite
   const decisionSchema = {
     type: "object",
     additionalProperties: false,
     properties: {
+      answered: { type: "boolean", description: "true si l'élève a effectivement répondu au cœur de la question" },
       next_action: { enum: ["ask_followup", "next_question", "finish"] },
       followup_question: { type: "string" },
+      missing_points: { type: "array", items: { type: "string" } },
       reason: { type: "string" }
     },
-    required: ["next_action"]
+    required: ["answered", "next_action"]
   };
 
   const summarySchema = {
@@ -102,23 +106,29 @@ window.Agent = (function () {
     required: ["objectifs","priorites","format_ideal","langue","projet_phrase_ultra_positive"]
   };
 
-  // --- Prompts ---
+  // ---------- Prompts ----------
 
   function decisionPrompt({ history, question, answer, hint_followup, followup_already_asked }) {
+    // ⬇️ Rubrique explicite: follow-up UNIQUEMENT si la réponse ne couvre pas le cœur.
     const system = [
       "Tu es un conseiller d’orientation. Une seule question à la fois.",
-      "Si la réponse de l’élève est ambiguë, pose UNE follow-up courte et ciblée; sinon passe à la question suivante.",
-      "Ne collecte pas de données sensibles. Reste concret, bienveillant et bref.",
-      "IMPORTANT: Réponds STRICTEMENT en JSON valide conforme au schéma fourni."
+      "Règle d'or: PAR DÉFAUT, passe à la question suivante.",
+      "NE POSE une question d’approfondissement QUE si l’élève n’a PAS répondu au cœur de la question.",
+      "Définition de 'répondu': l'élève apporte un choix clair OU une information directement liée au point central de la question (même succincte).",
+      "Cas 'pas répondu': vide, hors-sujet, 'je ne sais pas', uniquement généralités non actionnables, ou manque l'élément central (ex. pas de préférence demandée).",
+      "Si 'répondu' → answered=true et next_question.",
+      "Si 'pas répondu' → answered=false et ask_followup avec UNE question courte, ciblée, pour obtenir l’élément manquant.",
+      "Max 1 follow-up par question. N'invente pas. Garde un ton bref et bienveillant.",
+      "Retourne STRICTEMENT du JSON conforme au schéma."
     ].join(" ");
 
     const condensed = condenseHistory(history);
+
+    // Le hint est utilisé SEULEMENT si besoin de follow-up
     const rules = [
-      "Règles PoC:",
-      "- Max 1 follow-up par question.",
-      `- followup_already_asked=${!!followup_already_asked}.`,
-      `- hint_followup="${hint_followup || ""}".`,
-      "- Si la réponse est claire → next_question. finish seulement en fin de parcours ou si demandé."
+      "Utilise le hint uniquement si l'élément manque réellement.",
+      `followup_already_asked=${!!followup_already_asked}`,
+      `hint_followup="${hint_followup || ""}"`
     ].join("\n");
 
     const schemaText = JSON.stringify(decisionSchema);
@@ -144,22 +154,44 @@ window.Agent = (function () {
 
     const condensed = condenseHistory(history, 4000);
     const schemaText = JSON.stringify(summarySchema);
-    const user = [
-      `Schéma: ${schemaText}`,
-      `Historique:\n${condensed}`
-    ].join("\n\n");
+    const user = [`Schéma: ${schemaText}`, `Historique:\n${condensed}`].join("\n\n");
     return { system, user };
   }
 
-  // --- API agent ---
+  // ---------- API Agent ----------
 
   async function decideNext({ history, question, answer, hint_followup, followup_already_asked }) {
     const { system, user } = decisionPrompt({ history, question, answer, hint_followup, followup_already_asked });
     const res = await chatJSON({ system, user });
-    if (res?.next_action === "ask_followup" && followup_already_asked) {
-      // garde-fou côté client
-      return { next_action: "next_question", reason: "Follow-up déjà posée (limite PoC)." };
+
+    // ⬇️ Garde-fous côté client:
+    // - Si le modèle dit "answered === true", on force le passage à la question suivante.
+    if (res?.answered === true) {
+      return {
+        answered: true,
+        next_action: "next_question",
+        reason: res?.reason
+      };
     }
+
+    // - Si follow-up demandée mais déjà posée, on force le passage.
+    if (res?.next_action === "ask_followup" && followup_already_asked) {
+      return {
+        answered: false,
+        next_action: "next_question",
+        reason: "Follow-up déjà posée (limite PoC)."
+      };
+    }
+
+    // - Petit garde-fou : pas de follow-up sans question
+    if (res?.next_action === "ask_followup" && !res?.followup_question) {
+      return {
+        answered: false,
+        next_action: "next_question",
+        reason: "Pas de follow-up précise fournie par le modèle."
+      };
+    }
+
     return res;
   }
 
