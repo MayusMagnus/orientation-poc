@@ -1,0 +1,106 @@
+
+---
+
+## 2) `index.html`
+
+```html
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Orientation – PoC</title>
+  <link rel="stylesheet" href="./styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="left">
+      <h1>🎒 Orientation – PoC</h1>
+      <span class="muted">Statique (GitHub Pages) – Agent dans le navigateur</span>
+    </div>
+    <div class="right">
+      <button id="btnSettings" class="ghost">⚙️</button>
+      <button id="btnReset" class="danger">Réinitialiser</button>
+    </div>
+  </header>
+
+  <main class="container">
+    <section class="card">
+      <div class="panel">
+        <div class="progress" title="Progression des questions">
+          <div id="progressBar"></div>
+        </div>
+        <div id="chatlog" class="chatlog"></div>
+      </div>
+      <div class="composer">
+        <textarea id="input" placeholder="Écris ta réponse ici…"></textarea>
+        <button id="btnSend">Envoyer</button>
+        <button id="btnSkip" class="ghost">Passer</button>
+        <button id="btnFinish" class="danger">Terminer</button>
+      </div>
+    </section>
+
+    <aside class="card">
+      <div class="panel">
+        <h2>🧠 Synthèse & Mindmap</h2>
+        <div id="summaryCards" class="grid"></div>
+      </div>
+      <div class="mindmap-wrap">
+        <div id="mindmap"></div>
+      </div>
+      <div class="mindmap-actions">
+        <button id="btnExportSvg">Exporter SVG</button>
+      </div>
+    </aside>
+  </main>
+
+  <!-- Modale Clé API -->
+  <dialog id="apiModal">
+    <form method="dialog" class="modal">
+      <h3>🔑 Clé API OpenAI requise</h3>
+      <p class="muted">Elle n'est jamais sauvegardée dans le code. Option : mémoriser dans cet onglet.</p>
+      <label>Clé (sk-...)</label>
+      <input type="password" id="apiKeyInput" placeholder="sk-..." />
+      <div class="row">
+        <label><input type="checkbox" id="rememberKey" /> Mémoriser dans cet onglet (sessionStorage)</label>
+      </div>
+      <div class="row">
+        <label>Endpoint</label>
+        <input type="text" id="apiBaseInput" value="https://api.openai.com/v1" />
+      </div>
+      <div class="row">
+        <label>Modèle</label>
+        <input type="text" id="apiModelInput" value="gpt-4o-mini" />
+      </div>
+      <menu>
+        <button value="cancel" class="ghost">Annuler</button>
+        <button value="ok" id="apiSaveBtn">Se connecter</button>
+      </menu>
+    </form>
+  </dialog>
+
+  <!-- Modale Réglages -->
+  <dialog id="settingsModal">
+    <form method="dialog" class="modal">
+      <h3>⚙️ Réglages</h3>
+      <div class="row">
+        <label>Endpoint</label>
+        <input type="text" id="settingsApiBase" />
+      </div>
+      <div class="row">
+        <label>Modèle</label>
+        <input type="text" id="settingsApiModel" />
+      </div>
+      <menu>
+        <button value="cancel" class="ghost">Fermer</button>
+        <button value="ok" id="settingsSaveBtn">Enregistrer</button>
+      </menu>
+    </form>
+  </dialog>
+
+  <script>mermaid.initialize({ startOnLoad: false, theme: 'dark' });</script>
+  <script src="./scripts/agent.js"></script>
+  <script src="./scripts/app.js"></script>
+</body>
+</html>

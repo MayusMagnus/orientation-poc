@@ -1,0 +1,52 @@
+[
+  {
+    "id": "q1",
+    "text": "Pourquoi veux-tu partir à l’étranger ? Plutôt académique, professionnelle ou personnelle ?",
+    "hint": "Demande la priorité (académique/pro/perso) et un exemple concret."
+  },
+  {
+    "id": "q2",
+    "text": "Qu’aimerais-tu apprendre ou découvrir en priorité (langue, culture, autonomie, métier) ?",
+    "hint": "Fais hiérarchiser (Top 3) et pourquoi le #1 est prioritaire."
+  },
+  {
+    "id": "q3",
+    "text": "Dans quels pays ou régions te verrais-tu vivre, sans limite ? Pourquoi ?",
+    "hint": "Creuse 1 choix : ce qui t’attire concrètement (vie étudiante, secteur, climat…)."
+  },
+  {
+    "id": "q4",
+    "text": "Quelle langue veux-tu pratiquer ou améliorer ? Ton niveau actuel ? Ton niveau visé ?",
+    "hint": "Pose 1 mini-situation immersive (ex: demander son chemin, discuter en soirée)."
+  },
+  {
+    "id": "q5",
+    "text": "Tu préfères une culture proche ou un fort dépaysement ? Pourquoi ?",
+    "hint": "Teste la fibre aventure : prêt·e à partir loin/longtemps ? motivations vs attache familiale."
+  },
+  {
+    "id": "q6",
+    "text": "Quel type de séjour te correspond le mieux : études, stage, volontariat, job, séjour linguistique, césure ? Et pour combien de temps ?",
+    "hint": "Préciser durée (semaines/mois) et contexte idéal (campus, entreprise, ONG…)."
+  },
+  {
+    "id": "q7",
+    "text": "Souhaites-tu solliciter une bourse ?",
+    "hint": "Si oui, raisons principales (financement partiel/total, critères)."
+  },
+  {
+    "id": "q8",
+    "text": "Quelles sont tes inquiétudes principales (sécurité, confort, adaptation, solitude, santé, démarches…) ?",
+    "hint": "Prioriser 1–2 inquiétudes + 1 piste de mitigation à valider."
+  },
+  {
+    "id": "q9",
+    "text": "Décris ton projet en une phrase : où, combien de temps, pour quoi faire.",
+    "hint": "Aider à rendre la phrase plus spécifique (lieu+durée+objet)."
+  },
+  {
+    "id": "q10",
+    "text": "Es-tu déjà parti·e à l’international ? Où, quand, dans quel cadre, combien de temps ? Qu’as-tu aimé, pas aimé, appris ?",
+    "hint": "Extraire 1 leçon actionnable pour le futur séjour."
+  }
+]
