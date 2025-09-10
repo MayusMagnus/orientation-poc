@@ -1,9 +1,7 @@
 // scripts/app.js
 //
-// UI + mindmap (root image). Anti-duplication stricte des sous-questions :
-// - on mémorise la question de base et tous les follow-ups déjà posés pour la question
-// - on compare aussi au DERNIER message assistant
-// - si doublon → on demande une variante au LLM ; si encore trop proche → fallback gabarits.
+// UI + mindmap (root image). Anti-duplication stricte des sous-questions.
+// Paramétrage par question : max_followups, skip_revisit.
 
 (async function () {
   // ---- DOM ----
@@ -51,11 +49,20 @@
     threadStart: 0             // index history au début de la question courante
   };
 
+  // Storage versionné (évite conflit si ordre/questions ont changé)
   const STORAGE_KEY = 'orientation_state_' + (window.APP_VERSION || 'dev');
 
   // ---- Helpers stockage ----
   function saveState() { sessionStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
   function loadState() { try { const raw = sessionStorage.getItem(STORAGE_KEY); if (raw) Object.assign(state, JSON.parse(raw)); } catch {} }
+
+  // ---- Politique par question : cap & reprise ----
+  function getPolicyForQuestion(q) {
+    return {
+      max_followups: Number(q?.max_followups ?? 5),
+      skip_revisit: Boolean(q?.skip_revisit)
+    };
+  }
 
   // ---- Helpers logique ----
   function setProgress() {
@@ -109,7 +116,10 @@
   }
   function isDuplicate(candidate, prevList, lastMsg, thresh=0.8) {
     const nC = normalize(candidate);
-    if (lastMsg && (normalize(lastMsg) === nC || jaccard(lastMsg, candidate) > thresh)) return true;
+    if (lastMsg) {
+      const nL = normalize(lastMsg);
+      if (nL === nC || jaccard(nL, nC) > thresh) return true;
+    }
     return (prevList || []).some(p => {
       const np = normalize(p);
       return np === nC || jaccard(np, nC) > thresh;
@@ -289,7 +299,12 @@
   function startRevisitPhase() {
     if (!state.unsatisfied.length) return finalizeSummary();
     state.phase = "revisit";
-    state.revisitQueue = state.unsatisfied.map(x => x.id);
+    state.revisitQueue = state.unsatisfied
+      .filter(item => {
+        const q = state.questions.find(x => x.id === item.id);
+        return q && !q.skip_revisit;
+      })
+      .map(x => x.id);
     saveState();
     askNextRevisit();
   }
@@ -347,7 +362,8 @@
           history: state.history, question: qText, answer: text,
           hint_followup: "", followup_count: 0,
           previous_followups: [], last_answers: getLastAnswersSinceThreadStart(),
-          last_assistant: lastAssistant()
+          last_assistant: lastAssistant(),
+          max_followups: 5, skip_revisit: false
         });
         logAssistant(res?.answered === true ? "Merci, c’est clair. ✅" : "Merci, je note ta réponse. ✔️");
         return await completeCurrentRevisit();
@@ -357,6 +373,8 @@
       const q = currentQuestion(); const qid = q.id;
       const attempts = state.attempts[qid] || 0;
       const previous_followups = state.followups[qid] || [];
+      const policy = getPolicyForQuestion(q);
+
       const decision = await window.Agent.decideNext({
         history: state.history,
         question: q.text,
@@ -365,7 +383,9 @@
         followup_count: attempts,
         previous_followups,
         last_answers: getLastAnswersSinceThreadStart(),
-        last_assistant: lastAssistant()
+        last_assistant: lastAssistant(),
+        max_followups: policy.max_followups,
+        skip_revisit: policy.skip_revisit
       });
 
       if (decision.answered === true) {
@@ -376,14 +396,16 @@
         const nextAttempts = attempts + 1;
         state.attempts[qid] = nextAttempts; saveState();
 
-        // Mémoriser points manquants pour la reprise
+        // Mémoriser points manquants pour la reprise (si autorisée)
         const lastUserAnswers = state.history.filter(t => t.role === "user").slice(-2).map(t => t.content);
         const missing = decision.missing_points || [];
         const existingIdx = state.unsatisfied.findIndex(x => x.id === qid);
-        if (existingIdx === -1) state.unsatisfied.push({ id: qid, questionText: q.text, last_answers: lastUserAnswers, missing_points: missing });
-        else { state.unsatisfied[existingIdx].last_answers = lastUserAnswers; state.unsatisfied[existingIdx].missing_points = missing; }
+        if (!policy.skip_revisit) {
+          if (existingIdx === -1) state.unsatisfied.push({ id: qid, questionText: q.text, last_answers: lastUserAnswers, missing_points: missing });
+          else { state.unsatisfied[existingIdx].last_answers = lastUserAnswers; state.unsatisfied[existingIdx].missing_points = missing; }
+        }
 
-        if (decision.next_action === "ask_followup" && nextAttempts < 5) {
+        if (decision.next_action === "ask_followup" && nextAttempts < policy.max_followups) {
           // Anti-duplication stricte
           let fup = await ensureNonDuplicateFollowup(decision.followup_question || "", q.text, qid);
           // mémoriser et afficher
@@ -442,7 +464,8 @@
 
   settingsSaveBtn.addEventListener("click", () => {
     const base = settingsApiBase.value.trim();
-    const model = settingsApiModel.value.trim();
+    theModel = settingsApiModel.value.trim();
+    const model = theModel || "gpt-4o-mini";
     window.Agent.configure({ baseUrl:base, model });
     sessionStorage.setItem("OPENAI_BASE", base);
     sessionStorage.setItem("OPENAI_MODEL", model);
@@ -478,6 +501,13 @@
     const res = await fetch(`./data/questions.json?v=${qsVersion}`);
     state.questions = await res.json();
   } catch { alert("Impossible de charger data/questions.json"); return; }
+
+  // Nettoie les entrées "insatisfaites" pour les questions exclues de la reprise (sessions existantes)
+  state.unsatisfied = (state.unsatisfied || []).filter(item => {
+    const q = state.questions.find(x => x.id === item.id);
+    return q && !Boolean(q.skip_revisit);
+  });
+  saveState();
 
   const key = sessionStorage.getItem("OPENAI_KEY");
   const base = sessionStorage.getItem("OPENAI_BASE") || "https://api.openai.com/v1";

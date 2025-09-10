@@ -42,17 +42,18 @@
     history = [], question, answer,
     hint_followup = "", followup_count = 0,
     previous_followups = [], last_answers = [],
-    last_assistant = ""
+    last_assistant = "", max_followups = 5, skip_revisit = false
   }) => {
     const sys = [
-      "Tu es un conseiller d’orientation exigeant et bienveillant.",
+      "Tu es un conseiller d’orientation exigeant et bienveillant. Tu t'adresses à un(e) lycéen(ne) français(e).",
       "RÈGLES:",
-      "• Creuse chaque question jusqu’à obtenir des éléments concrets (exemples, critères mesurables, qui/quoi/où/quand/combien/comment) sauf pour la question de la bourse.",
-      "• Réponses vagues ou « je ne sais pas » → inacceptables: propose options, échelles (1-5), exemples.",
-      "• Rien de secret: rappelle qu’il faut tout expliciter.",
+      "• Creuse chaque question jusqu’à obtenir des éléments concrets (exemples, critères mesurables, qui/quoi/où/quand/combien/comment) sauf sur la question de la bourse.",
+      "• Réponses vagues ou « je ne sais pas » → pas satisfaisant: propose options, échelles (1-5), exemples.",
       "• NE JAMAIS répéter une sous-question déjà posée, ni reformuler exactement la question initiale, ni le DERNIER message de l’agent.",
       "• Pour éviter les répétitions, vérifie previous_followups et last_assistant et change d’angle.",
       "• Max 5 follow-ups par question. Ensuite, passer et marquer pour reprise.",
+      "• Respecte strictement la limite max de sous-questions transmise.",
+      "• Si 'skip_revisit' est vrai, privilégie le passage à la question suivante dès qu'une réponse minimale est donnée; ne cherche pas à marquer pour reprise.",
       "Réponds UNIQUEMENT en JSON valide."
     ].join("\n");
 
@@ -61,10 +62,12 @@
       student_answer: answer,
       hint_followup,
       followup_count,
-      max_followups: 5,
+      max_followups,
       previous_followups,
       last_assistant,
       last_answers,
+      max_followups,
+      skip_revisit,
       history_excerpt: compactHistory(history, 30),
       wanted_output: {
         answered: "boolean",
