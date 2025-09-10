@@ -9,11 +9,9 @@
   <title>Orientation</title>
 
   <!-- ⬆️ Incrémente à chaque déploiement -->
-  <script>window.APP_VERSION="2025-09-10-15";</script>
+  <script>window.APP_VERSION="2025-09-10-17";</script>
 
-  <link rel="stylesheet" href="./styles.css?v=2025-09-10-15" />
-  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
-  <script>mermaid.initialize({ startOnLoad: false, theme: 'neutral' });</script>
+  <link rel="stylesheet" href="./styles.css?v=2025-09-10-17" />
 </head>
 <body>
   <header class="topbar minimal">
@@ -22,11 +20,12 @@
       <button id="btnReset" class="ghost small" title="Réinitialiser">↺</button>
     </div>
     <div class="actions">
-      <img src="./assets/renard_univia.png?v=2025-09-10-15" alt="Univia" class="logo">
+      <img src="./assets/renard_univia.png?v=2025-09-10-17" alt="Univia" class="logo">
     </div>
   </header>
 
   <main id="app" class="stage-wrap">
+    <!-- Écran d’accueil -->
     <section class="stage card" id="welcomeStage">
       <div class="welcome-hero fade-in">
         <h1>Bienvenue dans le module <span>Orientation</span></h1>
@@ -34,6 +33,7 @@
       </div>
     </section>
 
+    <!-- Questions -->
     <section class="stage card hidden" id="questionStage">
       <div class="progress"><div id="progressBar"></div></div>
       <div id="questionCard" class="question-card">
@@ -49,12 +49,18 @@
       </div>
     </section>
 
+    <!-- Synthèse -->
     <section class="stage card hidden" id="summaryStage">
-      <h2 class="section-title">🧠 Synthèse & Mindmap</h2>
+      <h2 class="section-title">🧠 Synthèse & Récapitulatif</h2>
+
+      <!-- Encadrés (inchangé) -->
       <div id="summaryCards" class="grid"></div>
-      <div class="mindmap-wrap"><div id="mindmap"></div></div>
+
+      <!-- Nouveau : Récap narratif -->
+      <div id="recap" class="recap"></div>
+
+      <!-- Actions -->
       <div class="mindmap-actions">
-        <button id="btnExportSvg" class="ghost">Exporter SVG</button>
         <button id="btnExportLog" class="ghost">Exporter le log</button>
       </div>
     </section>
@@ -83,10 +89,11 @@
     </form>
   </dialog>
 
-  <script src="./scripts/agent.js?v=2025-09-10-15"></script>
-  <script src="./scripts/app.js?v=2025-09-10-15"></script>
+  <script src="./scripts/agent.js?v=2025-09-10-17"></script>
+  <script src="./scripts/app.js?v=2025-09-10-17"></script>
 
   <script>
+    // Service worker: force refresh après mise à jour
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
         navigator.serviceWorker.register('./sw.js?v=' + (window.APP_VERSION || Date.now()))

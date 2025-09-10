@@ -17,7 +17,7 @@
   {
     "id": "q4",
     "text": "Quelle langue veux-tu pratiquer ou améliorer ? Quel est ton niveau actuel ? Ton niveau visé ?",
-    "hint": "Une fois que tu as tes réponses sur la langue et les niveaux, mets l'élève dans une mini-situation immersive (ex: demander son chemin, discuter en soirée). Tu lui poses alors une question dans la langue cible, au niveau actuel. Si c'est trop dur pour lui, tu peux encore reposer 1 seule question plus simple, ensuite tu passes à la question suivante."
+    "hint": "Mini-situation immersive (ex: demander son chemin, discuter en soirée). Teste le niveau du lycéen en lui posant une question dans la langue cible, au niveau actuel. Si c'est trop dur pour lui, tu peux encore reposer 1 seule question plus simple, ensuite tu passes à la question suivante."
   },
   {
     "id": "q5",
@@ -33,7 +33,6 @@
     "id": "q7",
     "text": "Souhaites-tu solliciter une bourse ?",
     "hint": "Si 'Oui' ou 'Je ne sais pas', lui demander s'il connaît déjà des systèmes de bourse ? Si oui, pour quelles raisons principales (financement partiel/total, critères).",
-    "max_followups": 2,
     "skip_revisit": true
   },
   {

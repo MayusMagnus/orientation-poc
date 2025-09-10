@@ -1,6 +1,7 @@
 // scripts/app.js
 //
-// UI + mindmap (root image). Anti-duplication stricte des sous-questions.
+// UI + encadrés + récap narratif (plus de mindmap).
+// Anti-duplication stricte des sous-questions.
 // Paramétrage par question : max_followups, skip_revisit.
 // + LOGS : trace tous les événements (timestamps ISO, durées, décisions) et export JSON.
 
@@ -14,8 +15,7 @@
   const btnSend = document.getElementById("btnSend");
   const btnSkip = document.getElementById("btnSkip");
   const btnFinish = document.getElementById("btnFinish");
-  const btnExportSvg = document.getElementById("btnExportSvg");
-  const btnExportLog = document.getElementById("btnExportLog"); // NEW
+  const btnExportLog = document.getElementById("btnExportLog");
   const btnReset = document.getElementById("btnReset");
   const btnSettings = document.getElementById("btnSettings"); // peut être null
 
@@ -35,6 +35,7 @@
   const questionStage = document.getElementById("questionStage");
   const welcomeStage = document.getElementById("welcomeStage");
   const summaryCards = document.getElementById("summaryCards");
+  const recapEl = document.getElementById("recap");
 
   // ---- State ----
   const state = {
@@ -42,6 +43,7 @@
     idx: 0,
     history: [],
     summary: null,
+    recap: null,
     attempts: {},              // nb de follow-ups posés par question (key = qid)
     followups: {},             // follow-ups (et question de base) posés par question (key = qid) => string[]
     unsatisfied: [],
@@ -52,7 +54,7 @@
     timers: {
       questionStartMs: null,   // Date.now() à l’affichage de la question
     },
-    logs: []                   // NEW: événements
+    logs: []                   // événements
   };
 
   // Storage versionné (évite conflit si ordre/questions ont changé)
@@ -159,7 +161,6 @@
   async function ensureNonDuplicateFollowup(proposed, qText, qid) {
     const prev = state.followups[qid] || [];
     const last = lastAssistant();
-    // 1) Si doublon → demander rephrase
     if (isDuplicate(proposed, prev, last, 0.78)) {
       try {
         const apiStart = performance.now();
@@ -176,12 +177,10 @@
           return alt.question;
         }
       } catch {}
-      // 2) Fallback gabarits
       const pool = fallbackFollowups(qText);
       for (const cand of pool) {
         if (!isDuplicate(cand, prev, last, 0.78)) return cand;
       }
-      // 3) Dernier recours : ajoute une contrainte de chiffres
       return `Sois concret sur "${qText}": indique un lieu précis, une date cible et une durée estimée.`;
     }
     return proposed;
@@ -193,25 +192,15 @@
     logAssistant(label);
     await swapQuestion(label);
 
-    // démarrer un "thread" pour cette question
     state.threadStart = state.history.length;
     if (!state.followups[qid]) state.followups[qid] = [];
-    // mémoriser la question de base (sans le préfixe Qn:)
     if (!state.followups[qid].includes(q.text)) state.followups[qid].push(q.text);
 
-    // timer question
     state.timers.questionStartMs = Date.now();
 
     setProgress();
 
-    // LOG
-    logEvent({
-      event: "question_shown",
-      qid,
-      qindex: state.idx,
-      text: q.text,
-      policy: getPolicyForQuestion(q)
-    });
+    logEvent({ event: "question_shown", qid, qindex: state.idx, text: q.text, policy: getPolicyForQuestion(q) });
   }
 
   async function transitionWelcomeToQuestion() {
@@ -241,75 +230,11 @@
 
     setProgress();
 
-    // LOG
-    logEvent({
-      event: "question_shown",
-      qid,
-      qindex: state.idx,
-      text: q.text,
-      policy: getPolicyForQuestion(q)
-    });
+    logEvent({ event: "question_shown", qid, qindex: state.idx, text: q.text, policy: getPolicyForQuestion(q) });
   }
 
-  function escapeMermaid(s) {
-    return String(s).replace(/[{}<>]/g, m => ({'{':'\\u007B','}':'\\u007D','<':'\\u003C','>':'\\u003E'}[m]));
-  }
-
-  // === Root image dans la mindmap (globe) ===
-  function replaceRootWithImage(containerEl) {
-    try {
-      const svg = containerEl.querySelector('svg'); if (!svg) return;
-      const texts = Array.from(svg.querySelectorAll('text'));
-      const rootText = texts.find(t => (t.textContent || '').trim().toLowerCase().includes('mon projet'));
-      if (!rootText) return;
-      const rootGroup = rootText.closest('g') || svg;
-      const circle = rootGroup.querySelector('circle, ellipse'); if (!circle) return;
-      const isEllipse = circle.tagName.toLowerCase() === 'ellipse';
-      let cx, cy, r, rx, ry;
-      if (isEllipse) { cx = parseFloat(circle.getAttribute('cx')||'0'); cy = parseFloat(circle.getAttribute('cy')||'0'); rx = parseFloat(circle.getAttribute('rx')||'0'); ry = parseFloat(circle.getAttribute('ry')||'0'); }
-      else { cx = parseFloat(circle.getAttribute('cx')||'0'); cy = parseFloat(circle.getAttribute('cy')||'0'); r = parseFloat(circle.getAttribute('r')||'0'); rx=r; ry=r; }
-      const size = Math.max(10, Math.min(rx, ry) * 2 * 0.96);
-      const x = cx - size/2, y = cy - size/2;
-      rootText.style.display = 'none';
-      circle.setAttribute('fill','none'); circle.setAttribute('stroke', circle.getAttribute('stroke') || '#d1d5db'); circle.setAttribute('stroke-width', circle.getAttribute('stroke-width') || '1.2');
-      const defs = svg.querySelector('defs') || svg.insertBefore(document.createElementNS('http://www.w3.org/2000/svg','defs'), svg.firstChild);
-      const clipId = 'rootClip-' + Math.random().toString(36).slice(2);
-      const clip = document.createElementNS('http://www.w3.org/2000/svg','clipPath'); clip.setAttribute('id', clipId);
-      const clipCircle = document.createElementNS('http://www.w3.org/2000/svg','circle'); clipCircle.setAttribute('cx', String(cx)); clipCircle.setAttribute('cy', String(cy)); clipCircle.setAttribute('r', String(Math.min(rx,ry)));
-      clip.appendChild(clipCircle); defs.appendChild(clip);
-      const img = document.createElementNS('http://www.w3.org/2000/svg','image');
-      img.setAttributeNS('http://www.w3.org/1999/xlink','href', `./assets/globe.png?v=${window.APP_VERSION || Date.now()}`);
-      img.setAttribute('x', String(x)); img.setAttribute('y', String(y));
-      img.setAttribute('width', String(size)); img.setAttribute('height', String(size));
-      img.setAttribute('preserveAspectRatio','xMidYMid slice'); img.setAttribute('clip-path', `url(#${clipId})`);
-      if (circle.nextSibling) rootGroup.insertBefore(img, circle.nextSibling); else rootGroup.appendChild(img);
-    } catch (e) { console.warn('replaceRootWithImage error', e); }
-  }
-
-  async function renderMindmap(summary) {
-    const mm = [
-      "mindmap",
-      "  root((Mon projet))",
-      "    🎯 Objectifs",
-      ... (summary.objectifs || []).map(v => `      - ${escapeMermaid(v)}`),
-      "    📋 Priorités",
-      ... (summary.priorites || []).map(v => `      - ${escapeMermaid(v)}`),
-      "    🎓 Format idéal",
-      summary.format_ideal ? `      - ${escapeMermaid(summary.format_ideal)}` : "",
-      summary.meta && summary.meta.duree_pref ? `      - Durée: ${escapeMermaid(summary.meta.duree_pref)}` : "",
-      "    🗣️ Langue & niveau",
-      summary.langue ? `      - ${escapeMermaid(summary.langue)}` : "",
-      summary.niveau_actuel ? `      - Niveau actuel: ${escapeMermaid(summary.niveau_actuel)}` : "",
-      summary.niveau_cible ? `      - Niveau cible: ${escapeMermaid(summary.niveau_cible)}` : "",
-      summary.ambition_progression ? `      - Ambition: ${escapeMermaid(summary.ambition_progression)}` : "",
-      "    ✨ Mon projet",
-      summary.projet_phrase_ultra_positive ? `      - ${escapeMermaid(summary.projet_phrase_ultra_positive)}` : ""
-    ].filter(Boolean).join("\n");
-
-    const el = document.getElementById("mindmap");
-    const { svg } = await mermaid.render("mindmap-svg", mm);
-    el.innerHTML = svg;
-    replaceRootWithImage(el);
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
   }
 
   function fillSummaryCards(summary) {
@@ -334,6 +259,34 @@
       for (const it of items) { const pill = document.createElement("span"); pill.className = "pill"; pill.textContent = it; box.appendChild(pill); }
       wrap.appendChild(box);
       summaryCards.appendChild(wrap);
+    }
+  }
+
+  function renderRecap(recap) {
+    recapEl.innerHTML = "";
+
+    const sections = [
+      { key: "self_learning", title: "🌱 Connaissance de soi et apprentissage" },
+      { key: "academic",      title: "🎓 Ambitions académiques" },
+      { key: "environment",   title: "🌍 Cadre de vie et environnement" },
+      { key: "social",        title: "🤝 Relations sociales et ouverture" }
+    ];
+
+    for (const s of sections) {
+      const block = document.createElement("div");
+      block.className = "card panel";
+
+      const h3 = document.createElement("h3");
+      h3.className = "recap-title";
+      h3.textContent = s.title;
+
+      const p = document.createElement("p");
+      p.className = "recap-text";
+      p.textContent = (recap && recap[s.key]) ? recap[s.key] : "";
+
+      block.appendChild(h3);
+      block.appendChild(p);
+      recapEl.appendChild(block);
     }
   }
 
@@ -387,20 +340,36 @@
 
   async function finalizeSummary() {
     try {
-      const apiStart = performance.now();
+      const sumStart = performance.now();
       const sum = await window.Agent.summarize({ history: state.history });
-      const apiMs = Math.round(performance.now() - apiStart);
+      const sumMs = Math.round(performance.now() - sumStart);
 
       state.summary = sum; saveState();
       fillSummaryCards(sum);
-      await renderMindmap(sum);
+
+      const recapStart = performance.now();
+      const recap = await window.Agent.recap({ history: state.history, summary: state.summary });
+      const recapMs = Math.round(performance.now() - recapStart);
+
+      state.recap = recap; saveState();
+      renderRecap(recap);
+
       questionStage.classList.add("hidden");
       welcomeStage.classList.add("hidden");
       summaryStage.classList.remove("hidden");
 
-      logEvent({ event: "summary_generated", api_ms: apiMs, objectives_count: (sum.objectifs||[]).length });
-    } catch (e) { alert(e.message || e); }
-    finally { setComposerEnabled(true); }
+      logEvent({
+        event: "summary_and_recap_generated",
+        summarize_ms: sumMs,
+        recap_ms: recapMs,
+        recap_lengths: Object.fromEntries(Object.entries(recap || {}).map(([k, v]) => [k, (v || "").length]))
+      });
+    } catch (e) {
+      alert(e.message || e);
+      logEvent({ event: "error_finalizeSummary", message: String(e) });
+    } finally {
+      setComposerEnabled(true);
+    }
   }
 
   // ---- Export log ----
@@ -433,7 +402,6 @@
       ? { id: state.currentRevisit.id, text: state.currentRevisit.text }
       : currentQuestion();
 
-    // LOG réponse élève (+ temps de réponse à partir de l’affichage de la question)
     const responseMs = state.timers.questionStartMs ? (Date.now() - state.timers.questionStartMs) : null;
     logEvent({ event: "user_answer", qid: q?.id, qindex: state.idx, answer: text, response_ms: responseMs });
 
@@ -494,7 +462,6 @@
       if (decision.answered === true) {
         state.attempts[qid] = 0; saveState();
 
-        // passage à la question suivante
         logEvent({ event: "next_question", from_qid: qid });
 
         state.idx = Math.min(state.idx + 1, state.questions.length);
@@ -513,20 +480,15 @@
         }
 
         if (decision.next_action === "ask_followup" && nextAttempts < policy.max_followups) {
-          // Anti-duplication stricte
           let fup = await ensureNonDuplicateFollowup(decision.followup_question || "", q.text, qid);
-          // mémoriser et afficher
           state.followups[qid] = [...previous_followups, fup]; saveState();
 
-          // LOG follow-up
           logEvent({ event: "followup_asked", qid, attempt: nextAttempts, text: fup });
 
           await swapQuestion(fup); logAssistant(fup);
 
-          // Redémarrer le timer de réponse pour cette sous-question
           state.timers.questionStartMs = Date.now();
         } else {
-          // cap atteint ou modèle propose de passer
           state.attempts[qid] = 0; saveState();
           logEvent({ event: "advance_due_to_cap_or_model", qid, attempts: nextAttempts, cap: policy.max_followups });
 
@@ -617,15 +579,7 @@
   input.addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); onSend(); }});
   btnSkip.addEventListener("click", onSkip);
   btnFinish.addEventListener("click", onFinish);
-  btnExportSvg?.addEventListener("click", () => {
-    const svg = document.querySelector("#mindmap svg");
-    if (!svg) return alert("Mindmap non disponible.");
-    const blob = new Blob([svg.outerHTML], { type: "image/svg+xml" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a"); a.href = url; a.download = "mindmap.svg"; a.click();
-    URL.revokeObjectURL(url);
-  });
-  btnExportLog?.addEventListener("click", exportLog); // NEW
+  btnExportLog?.addEventListener("click", exportLog);
 
   // ---- Bootstrap ----
   loadState();
@@ -654,6 +608,7 @@
     if (state.summary) {
       questionStage.classList.add("hidden");
       summaryStage.classList.remove("hidden");
+      if (state.recap) renderRecap(state.recap);
     } else if (state.phase === "revisit" && state.currentRevisit) {
       questionText.textContent = `🔁 ${state.currentRevisit.text}`;
     } else {
