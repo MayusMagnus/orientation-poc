@@ -1,7 +1,7 @@
 [
   {
     "id": "q1",
-    "text": "Pourquoi souhaites-tu partir à l’étranger ? Plutôt pour des raisons académiques, professionnelles ou personnelles ?",
+    "text": "Pourquoi souhaites-tu partir à l’étranger ?",
     "hint": "Demande la priorité (académique/pro/perso) et un exemple concret."
   },
   {
@@ -17,7 +17,7 @@
   {
     "id": "q4",
     "text": "Quelle langue veux-tu pratiquer ou améliorer ? Quel est ton niveau actuel ? Ton niveau visé ?",
-    "hint": "Pose 1 mini-situation immersive (ex: demander son chemin, discuter en soirée)."
+    "hint": "Pose 1 mini-situation immersive (ex: demander son chemin, discuter en soirée) dans la langue cible, au niveau actuel."
   },
   {
     "id": "q5",
@@ -32,7 +32,7 @@
   {
     "id": "q7",
     "text": "Souhaites-tu solliciter une bourse ?",
-    "hint": "Si oui, raisons principales (financement partiel/total, critères)."
+    "hint": "Si 'Oui' ou 'Je ne sais pas', lui demander s'il connaît déjà des systèmes de bourse ? Si oui, raisons principales (financement partiel/total, critères)."
   },
   {
     "id": "q8",
@@ -41,8 +41,8 @@
   },
   {
     "id": "q9",
-    "text": "Es-tu déjà parti à l’international ? Où, quand, dans quel cadre, combien de temps ? Qu’as-tu aimé, pas aimé, appris ?",
-    "hint": "Extraire 1 leçon actionnable pour le futur séjour."
+    "text": "Es-tu déjà parti.e à l’international ? Où, quand, dans quel cadre, combien de temps ? Qu’as-tu aimé, pas aimé, appris ?",
+    "hint": "Si jamais parti, pourquoi, y a-t-il une raison particulière (financière, etc). Si oui, extraire 1 leçon actionnable pour le futur séjour."
   },
   {
     "id": "q10",
