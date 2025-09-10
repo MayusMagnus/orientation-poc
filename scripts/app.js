@@ -1,7 +1,7 @@
 // scripts/app.js
 //
-// UI épurée : écran de bienvenue puis transition en fondu vers la 1re question.
-// Ajout : remplacement du nœud central "Mon projet" par une image (assets/globe.png) avec sizing auto.
+// UI épurée + transitions + Mindmap (root image).
+// Logique MAJ : on creuse jusqu’à 5 follow-ups max/question.
 
 (async function () {
   // ---- DOM ----
@@ -15,7 +15,7 @@
   const btnFinish = document.getElementById("btnFinish");
   const btnExportSvg = document.getElementById("btnExportSvg");
   const btnReset = document.getElementById("btnReset");
-  const btnSettings = document.getElementById("btnSettings"); // peut être null (bouton retiré)
+  const btnSettings = document.getElementById("btnSettings"); // peut être null
 
   const apiModal = document.getElementById("apiModal");
   const apiKeyInput = document.getElementById("apiKeyInput");
@@ -38,42 +38,33 @@
   const state = {
     questions: [],
     idx: 0,
-    followupAsked: false,
     history: [],
     summary: null,
+    // attempts = nb de follow-ups posés pour une question (clé = question.id)
     attempts: {},
+    // liste de questions insuffisamment couvertes (pour reprise)
     unsatisfied: [],
     phase: "main",        // "main" | "revisit" | "done"
     revisitQueue: [],
     currentRevisit: null
   };
 
-  // ---- Helpers ----
+  // Storage versionné (évite conflit si ordre/questions ont changé)
   const STORAGE_KEY = 'orientation_state_' + (window.APP_VERSION || 'dev');
 
-  function saveState() {
-    sessionStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-  }
+  function saveState() { sessionStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
   function loadState() {
-    try {
-      const raw = sessionStorage.getItem(STORAGE_KEY);
-      if (raw) Object.assign(state, JSON.parse(raw));
-    } catch {}
+    try { const raw = sessionStorage.getItem(STORAGE_KEY); if (raw) Object.assign(state, JSON.parse(raw)); } catch {}
   }
 
   function setProgress() {
     const total = state.questions.length || 1;
-    const pct = state.phase === "main"
-      ? Math.min(100, Math.round((state.idx / total) * 100))
-      : 100;
+    const pct = state.phase === "main" ? Math.min(100, Math.round((state.idx / total) * 100)) : 100;
     progressBar.style.width = pct + "%";
   }
 
-  function currentQuestion() {
-    return state.questions[state.idx];
-  }
+  function currentQuestion() { return state.questions[state.idx]; }
 
-  // Historique interne (non affiché)
   function logAssistant(text){ state.history.push({ role:"assistant", content:text }); saveState(); }
   function logUser(text){ state.history.push({ role:"user", content:text }); saveState(); }
 
@@ -81,7 +72,6 @@
     input.disabled = !on; btnSend.disabled = !on; btnSkip.disabled = !on; btnFinish.disabled = !on;
   }
 
-  // Fondu sortant → maj → fondu entrant (pour le texte de la carte question)
   function swapQuestion(text) {
     return new Promise(resolve => {
       questionCard.classList.remove("fade-in");
@@ -115,7 +105,6 @@
   }
 
   async function transitionWelcomeToQuestion() {
-    // 1) Fade-out de l'écran de bienvenue
     await new Promise(resolve => {
       welcomeStage.classList.add("fade-out");
       welcomeStage.addEventListener("animationend", function handler(){
@@ -126,12 +115,10 @@
       }, { once:true });
     });
 
-    // 2) Afficher la carte question (fade-in)
     questionStage.classList.remove("hidden");
     questionStage.classList.add("fade-in");
     setTimeout(() => questionStage.classList.remove("fade-in"), 400);
 
-    // 3) Injecter et afficher la 1re question
     const label = questionLabel();
     logAssistant(label);
     showQuestionNow(label);
@@ -142,81 +129,36 @@
     return String(s).replace(/[{}<>]/g, m => ({'{':'\\u007B','}':'\\u007D','<':'\\u003C','>':'\\u003E'}[m]));
   }
 
-  // === Post-traitement SVG : remplacer le root "Mon projet" par une image ===
+  // Remplacement root par une image (globe)
   function replaceRootWithImage(containerEl, imageHref) {
     try {
       const svg = containerEl.querySelector('svg');
       if (!svg) return;
-
-      // Trouve le groupe contenant le texte "Mon projet"
       const texts = Array.from(svg.querySelectorAll('text'));
       const rootText = texts.find(t => (t.textContent || '').trim().toLowerCase().includes('mon projet'));
       if (!rootText) return;
-
       const rootGroup = rootText.closest('g') || svg;
-      // Cherche le cercle/ellipse associé au root
-      const circle = rootGroup.querySelector('circle, ellipse');
-      if (!circle) return;
-
-      // Récup coords/tailles
+      const circle = rootGroup.querySelector('circle, ellipse'); if (!circle) return;
       const isEllipse = circle.tagName.toLowerCase() === 'ellipse';
       let cx, cy, r, rx, ry;
-      if (isEllipse) {
-        cx = parseFloat(circle.getAttribute('cx') || '0');
-        cy = parseFloat(circle.getAttribute('cy') || '0');
-        rx = parseFloat(circle.getAttribute('rx') || '0');
-        ry = parseFloat(circle.getAttribute('ry') || '0');
-      } else {
-        cx = parseFloat(circle.getAttribute('cx') || '0');
-        cy = parseFloat(circle.getAttribute('cy') || '0');
-        r  = parseFloat(circle.getAttribute('r')  || '0');
-        rx = r; ry = r;
-      }
-      const size = Math.max(10, Math.min(rx, ry) * 2 * 0.96); // 96% du diamètre (petit padding)
-      const x = cx - size / 2;
-      const y = cy - size / 2;
-
-      // Masque le texte
+      if (isEllipse) { cx = parseFloat(circle.getAttribute('cx')||'0'); cy = parseFloat(circle.getAttribute('cy')||'0'); rx = parseFloat(circle.getAttribute('rx')||'0'); ry = parseFloat(circle.getAttribute('ry')||'0'); }
+      else { cx = parseFloat(circle.getAttribute('cx')||'0'); cy = parseFloat(circle.getAttribute('cy')||'0'); r = parseFloat(circle.getAttribute('r')||'0'); rx=r; ry=r; }
+      const size = Math.max(10, Math.min(rx, ry) * 2 * 0.96);
+      const x = cx - size/2, y = cy - size/2;
       rootText.style.display = 'none';
-      // Enlève le remplissage du cercle, garde un léger contour
-      circle.setAttribute('fill', 'none');
-      circle.setAttribute('stroke', circle.getAttribute('stroke') || '#d1d5db');
-      circle.setAttribute('stroke-width', circle.getAttribute('stroke-width') || '1.2');
-
-      // Ajoute un clipPath circulaire pour garder une forme ronde
-      const defs = svg.querySelector('defs') || svg.insertBefore(document.createElementNS('http://www.w3.org/2000/svg', 'defs'), svg.firstChild);
+      circle.setAttribute('fill','none'); circle.setAttribute('stroke', circle.getAttribute('stroke') || '#d1d5db'); circle.setAttribute('stroke-width', circle.getAttribute('stroke-width') || '1.2');
+      const defs = svg.querySelector('defs') || svg.insertBefore(document.createElementNS('http://www.w3.org/2000/svg','defs'), svg.firstChild);
       const clipId = 'rootClip-' + Math.random().toString(36).slice(2);
-      const clip = document.createElementNS('http://www.w3.org/2000/svg', 'clipPath');
-      clip.setAttribute('id', clipId);
-
-      // Clone un cercle pour le clip (toujours cercle même si ellipse : on prend min(rx,ry))
-      const clipCircle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-      clipCircle.setAttribute('cx', String(cx));
-      clipCircle.setAttribute('cy', String(cy));
-      clipCircle.setAttribute('r',  String(Math.min(rx, ry)));
-      clip.appendChild(clipCircle);
-      defs.appendChild(clip);
-
-      // Ajoute l'image
-      const img = document.createElementNS('http://www.w3.org/2000/svg', 'image');
-      img.setAttributeNS('http://www.w3.org/1999/xlink', 'href', imageHref);
-      img.setAttribute('x', String(x));
-      img.setAttribute('y', String(y));
-      img.setAttribute('width',  String(size));
-      img.setAttribute('height', String(size));
-      img.setAttribute('preserveAspectRatio', 'xMidYMid slice');
-      img.setAttribute('clip-path', `url(#${clipId})`);
-
-      // Place l'image juste après le cercle dans le rootGroup (pour que le contour reste visible au-dessus)
-      if (circle.nextSibling) {
-        rootGroup.insertBefore(img, circle.nextSibling);
-      } else {
-        rootGroup.appendChild(img);
-      }
-    } catch (e) {
-      // silencieux pour PoC
-      console.warn('replaceRootWithImage error', e);
-    }
+      const clip = document.createElementNS('http://www.w3.org/2000/svg','clipPath'); clip.setAttribute('id', clipId);
+      const clipCircle = document.createElementNS('http://www.w3.org/2000/svg','circle'); clipCircle.setAttribute('cx', String(cx)); clipCircle.setAttribute('cy', String(cy)); clipCircle.setAttribute('r', String(Math.min(rx,ry)));
+      clip.appendChild(clipCircle); defs.appendChild(clip);
+      const img = document.createElementNS('http://www.w3.org/2000/svg','image');
+      img.setAttributeNS('http://www.w3.org/1999/xlink','href', `./assets/globe.png?v=${window.APP_VERSION || Date.now()}`);
+      img.setAttribute('x', String(x)); img.setAttribute('y', String(y));
+      img.setAttribute('width', String(size)); img.setAttribute('height', String(size));
+      img.setAttribute('preserveAspectRatio','xMidYMid slice'); img.setAttribute('clip-path', `url(#${clipId})`);
+      if (circle.nextSibling) rootGroup.insertBefore(img, circle.nextSibling); else rootGroup.appendChild(img);
+    } catch (e) { console.warn('replaceRootWithImage error', e); }
   }
 
   async function renderMindmap(summary) {
@@ -232,9 +174,9 @@
       summary.meta && summary.meta.duree_pref ? `      - Durée: ${escapeMermaid(summary.meta.duree_pref)}` : "",
       "    🗣️ Langue & niveau",
       summary.langue ? `      - ${escapeMermaid(summary.langue)}` : "",
-      summary.niveau_actuel ? `      - Niveau actuel: ${escapeMermaid(summary.niveau_actuel)}` : "",
-      summary.niveau_cible ? `      - Niveau cible: ${escapeMermaid(summary.niveau_cible)}` : "",
-      summary.ambition_progression ? `      - Ambition: ${escapeMermaid(summary.ambition_progression)}` : "",
+      summary.niveau_actuel ? `      - ${escapeMermaid(summary.niveau_actuel)}` : "",
+      summary.niveau_cible ? `      - ${escapeMermaid(summary.niveau_cible)}` : "",
+      summary.ambition_progression ? `      - ${escapeMermaid(summary.ambition_progression)}` : "",
       "    ✨ Mon projet",
       summary.projet_phrase_ultra_positive ? `      - ${escapeMermaid(summary.projet_phrase_ultra_positive)}` : ""
     ].filter(Boolean).join("\n");
@@ -242,10 +184,7 @@
     const el = document.getElementById("mindmap");
     const { svg } = await mermaid.render("mindmap-svg", mm);
     el.innerHTML = svg;
-
-    // ⬇️ Remplace le root par le globe
-    const imgUrl = `./assets/globe.png?v=${window.APP_VERSION || Date.now()}`;
-    replaceRootWithImage(el, imgUrl);
+    replaceRootWithImage(el);
   }
 
   function fillSummaryCards(summary) {
@@ -273,11 +212,9 @@
     }
   }
 
-  // ---- Phase de reprise (inchangée) ----
+  // ---- Phase de reprise ----
   function startRevisitPhase() {
-    if (!state.unsatisfied.length) {
-      return finalizeSummary();
-    }
+    if (!state.unsatisfied.length) return finalizeSummary();
     state.phase = "revisit";
     state.revisitQueue = state.unsatisfied.map(x => x.id);
     saveState();
@@ -285,31 +222,20 @@
   }
 
   async function askNextRevisit() {
-    if (!state.revisitQueue.length) {
-      state.phase = "done"; saveState();
-      return finalizeSummary();
-    }
+    if (!state.revisitQueue.length) { state.phase = "done"; saveState(); return finalizeSummary(); }
     const qid = state.revisitQueue[0];
     const q = state.questions.find(x => x.id === qid);
     const meta = state.unsatisfied.find(x => x.id === qid) || {};
     try {
       const last_answers = meta.last_answers || [];
       const missing_points = meta.missing_points || [];
-      const ref = await window.Agent.reformulate({
-        original_question: q.text,
-        last_answers,
-        missing_points
-      });
+      const ref = await window.Agent.reformulate({ original_question: q.text, last_answers, missing_points });
       const reformulated = ref.reformulated_question || q.text;
-      state.currentRevisit = { id: qid, text: reformulated };
-      saveState();
-      await swapQuestion(`🔁 ${reformulated}`);
-      logAssistant(`🔁 ${reformulated}`);
+      state.currentRevisit = { id: qid, text: reformulated }; saveState();
+      await swapQuestion(`🔁 ${reformulated}`); logAssistant(`🔁 ${reformulated}`);
     } catch {
-      state.currentRevisit = { id: qid, text: q.text };
-      saveState();
-      await swapQuestion(`🔁 ${q.text}`);
-      logAssistant(`🔁 ${q.text}`);
+      state.currentRevisit = { id: qid, text: q.text }; saveState();
+      await swapQuestion(`🔁 ${q.text}`); logAssistant(`🔁 ${q.text}`);
     }
   }
 
@@ -326,15 +252,11 @@
       state.summary = sum; saveState();
       fillSummaryCards(sum);
       await renderMindmap(sum);
-      // Afficher la section synthèse, masquer la question + bienvenue
       questionStage.classList.add("hidden");
       welcomeStage.classList.add("hidden");
       summaryStage.classList.remove("hidden");
-    } catch (e) {
-      alert(e.message || e);
-    } finally {
-      setComposerEnabled(true);
-    }
+    } catch (e) { alert(e.message || e); }
+    finally { setComposerEnabled(true); }
   }
 
   // ---- Handlers ----
@@ -350,7 +272,7 @@
         const qText = state.currentRevisit.text;
         const res = await window.Agent.decideNext({
           history: state.history, question: qText, answer: text,
-          hint_followup: "", followup_already_asked: true
+          hint_followup: "", followup_count: 0 // en reprise, on avance dès qu’on a une réponse
         });
         logAssistant(res?.answered === true ? "Merci, c’est clair. ✅" : "Merci, je note ta réponse. ✔️");
         return await completeCurrentRevisit();
@@ -358,85 +280,58 @@
 
       // Phase principale
       const q = currentQuestion();
-      const decision = await window.Agent.decideNext({
-        history: state.history, question: q.text, answer: text,
-        hint_followup: q.hint, followup_already_asked: state.followupAsked
-      });
-
       const qid = q.id;
       const attempts = state.attempts[qid] || 0;
 
-      if (decision.answered === true) {
-        state.attempts[qid] = 0;
-        state.followupAsked = false;
-        saveState();
-        state.idx = Math.min(state.idx + 1, state.questions.length);
-        if (state.idx < state.questions.length) {
-          await showCurrentQuestion();
-        } else {
-          await onFinish();
-        }
-      } else {
-        const nextAttempts = attempts + 1;
-        state.attempts[qid] = nextAttempts;
+      const decision = await window.Agent.decideNext({
+        history: state.history, question: q.text, answer: text,
+        hint_followup: q.hint, followup_count: attempts
+      });
 
-        // stock pour reprise
+      if (decision.answered === true) {
+        // question couverte → reset compteur + next
+        state.attempts[qid] = 0; saveState();
+        state.idx = Math.min(state.idx + 1, state.questions.length);
+        if (state.idx < state.questions.length) await showCurrentQuestion(); else await onFinish();
+      } else {
+        const nextAttempts = (attempts + 1);
+        state.attempts[qid] = nextAttempts; saveState();
+
+        // marquer pour reprise (points manquants + dernières réponses)
         const lastUserAnswers = state.history.filter(t => t.role === "user").slice(-2).map(t => t.content);
         const missing = decision.missing_points || [];
         const existingIdx = state.unsatisfied.findIndex(x => x.id === qid);
-        if (existingIdx === -1) {
-          state.unsatisfied.push({ id: qid, questionText: q.text, last_answers: lastUserAnswers, missing_points: missing });
-        } else {
-          state.unsatisfied[existingIdx].last_answers = lastUserAnswers;
-          state.unsatisfied[existingIdx].missing_points = missing;
-        }
+        if (existingIdx === -1) state.unsatisfied.push({ id: qid, questionText: q.text, last_answers: lastUserAnswers, missing_points: missing });
+        else { state.unsatisfied[existingIdx].last_answers = lastUserAnswers; state.unsatisfied[existingIdx].missing_points = missing; }
 
-        if (decision.next_action === "ask_followup" && !state.followupAsked && nextAttempts < 2) {
-          state.followupAsked = true; saveState();
+        // si modèle veut creuser ET qu’on n’a pas atteint 5 follow-ups → poser la follow-up
+        if (decision.next_action === "ask_followup" && nextAttempts < 5) {
           await swapQuestion(decision.followup_question || "Peux-tu préciser ?");
           logAssistant(decision.followup_question || "Peux-tu préciser ?");
         } else {
-          state.followupAsked = false; saveState();
+          // sinon on avance (cap atteint ou modèle dit de passer)
+          state.attempts[qid] = 0; saveState();
           state.idx = Math.min(state.idx + 1, state.questions.length);
-          if (state.idx < state.questions.length) {
-            await showCurrentQuestion();
-          } else {
-            await onFinish();
-          }
+          if (state.idx < state.questions.length) await showCurrentQuestion(); else await onFinish();
         }
       }
-    } catch (e) {
-      alert(e.message || e);
-    } finally {
-      setComposerEnabled(true);
-    }
+    } catch (e) { alert(e.message || e); }
+    finally { setComposerEnabled(true); }
   }
 
   async function onSkip() {
     const q = currentQuestion();
-    if (q) {
-      state.attempts[q.id] = 0;
-      state.followupAsked = false;
-      saveState();
-    }
+    if (q) { state.attempts[q.id] = 0; saveState(); }
     state.idx = Math.min(state.idx + 1, state.questions.length);
-    if (state.idx < state.questions.length) {
-      await showCurrentQuestion();
-    } else {
-      await onFinish();
-    }
+    if (state.idx < state.questions.length) await showCurrentQuestion(); else await onFinish();
   }
 
   async function onFinish() {
     if (state.phase !== "main") {
-      if (state.phase === "revisit" && !state.revisitQueue.length) {
-        return finalizeSummary();
-      }
+      if (state.phase === "revisit" && !state.revisitQueue.length) return finalizeSummary();
       return;
     }
-    if (state.unsatisfied.length > 0) {
-      return startRevisitPhase();
-    }
+    if (state.unsatisfied.length > 0) return startRevisitPhase();
     return finalizeSummary();
   }
 
@@ -462,8 +357,6 @@
     if (rememberKey.checked) sessionStorage.setItem("OPENAI_KEY", key);
     sessionStorage.setItem("OPENAI_BASE", base);
     sessionStorage.setItem("OPENAI_MODEL", model);
-
-    // Transition de bienvenue -> 1re question
     await transitionWelcomeToQuestion();
   });
 
@@ -483,9 +376,7 @@
     location.reload();
   });
 
-  // Le bouton réglages peut ne pas exister : protège l'écouteur
   btnSettings?.addEventListener("click", openSettings);
-
   btnSend.addEventListener("click", onSend);
   input.addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); onSend(); }});
   btnSkip.addEventListener("click", onSkip);
@@ -502,36 +393,23 @@
   // ---- Bootstrap ----
   loadState();
 
-  // Charger questions (avec cache-busting)
   try {
     const qsVersion = (window.APP_VERSION || Date.now());
     const res = await fetch(`./data/questions.json?v=${qsVersion}`);
     state.questions = await res.json();
-  } catch {
-    alert("Impossible de charger data/questions.json");
-    return;
-  }
+  } catch { alert("Impossible de charger data/questions.json"); return; }
 
-  // Config clé
   const key = sessionStorage.getItem("OPENAI_KEY");
   const base = sessionStorage.getItem("OPENAI_BASE") || "https://api.openai.com/v1";
   const model = sessionStorage.getItem("OPENAI_MODEL") || "gpt-4o-mini";
   if (key) window.Agent.configure({ apiKey:key, baseUrl:base, model });
 
-  // État initial :
   if (state.history.length > 0 || key) {
     welcomeStage.classList.add("hidden");
     questionStage.classList.remove("hidden");
-    if (state.summary) {
-      questionStage.classList.add("hidden");
-      summaryStage.classList.remove("hidden");
-    } else if (state.phase === "revisit" && state.currentRevisit) {
-      questionText.textContent = `🔁 ${state.currentRevisit.text}`;
-    } else {
-      const lastAssistant = state.history.filter(h => h.role==="assistant").slice(-1)[0]?.content;
-      questionText.textContent = lastAssistant || questionLabel();
-      setProgress();
-    }
+    if (state.summary) { questionStage.classList.add("hidden"); summaryStage.classList.remove("hidden"); }
+    else if (state.phase === "revisit" && state.currentRevisit) { questionText.textContent = `🔁 ${state.currentRevisit.text}`; }
+    else { const lastAssistant = state.history.filter(h => h.role==="assistant").slice(-1)[0]?.content; questionText.textContent = lastAssistant || questionLabel(); setProgress(); }
   } else {
     if (typeof apiModal?.showModal === "function") apiModal.showModal();
   }

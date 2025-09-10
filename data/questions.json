@@ -36,8 +36,8 @@
   },
   {
     "id": "q8",
-    "text": "Quelles sont tes inquiétudes principales ? Aides à la réponse : sécurité (individuelle, politique, climatique), confort, adaptation (à la vie dans le campus, extra-campus), solitude, santé (mentale, physique), démarches administratives sur place (carte étudiant, services de l’université qui seraient lents)",
-    "hint": "Prioriser 1–2 inquiétudes + 1 piste de mitigation à valider."
+    "text": "Quelles sont tes inquiétudes principales sur place ?",
+    "hint": "Aides à la réponse : sécurité (individuelle, politique, climatique), confort, adaptation (à la vie dans le campus, extra-campus), solitude, santé (mentale, physique), démarches administratives sur place (carte étudiant, services de l’université qui seraient lents). Prioriser 1–2 inquiétudes + 1 piste de mitigation à valider."
   },
   {
     "id": "q9",

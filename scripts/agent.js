@@ -1,204 +1,189 @@
 // scripts/agent.js
 //
-// Agent "backend" exécuté dans le navigateur.
-// Appelle Chat Completions avec response_format=json_object.
-// La clé API et le modèle viennent d'une modale côté UI (app.js).
+// Agent côté front (OpenAI via fetch).
+// Règles générales appliquées dans les prompts :
+// 1) Creuser à chaque question (au minimum 1 follow-up, sauf réponse déjà complète)
+// 2) Allergique aux “je ne sais pas”/langage vague/secret → exiger des exemples concrets, chiffres, choix
+// 3) Rien de secret : encourager à tout expliciter (et rassurer)
+// 4) Si le tour est fait, passer à la question suivante
+// 5) Max 5 follow-ups par question, puis passer et marquer comme “insatisfaisant” pour reprise
 
-window.Agent = (function () {
-  let OPENAI_API_KEY = null;
-  let OPENAI_BASE_URL = "https://api.openai.com/v1";
-  let OPENAI_MODEL = "gpt-4o-mini";
+(function () {
+  const Agent = {};
+  let CONFIG = {
+    apiKey: null,
+    baseUrl: "https://api.openai.com/v1",
+    model: "gpt-4o-mini",
+  };
 
-  function configure({ apiKey, baseUrl, model }) {
-    OPENAI_API_KEY = apiKey || OPENAI_API_KEY;
-    OPENAI_BASE_URL = baseUrl || OPENAI_BASE_URL;
-    OPENAI_MODEL = model || OPENAI_MODEL;
-  }
+  Agent.configure = ({ apiKey, baseUrl, model }) => {
+    if (apiKey) CONFIG.apiKey = apiKey;
+    if (baseUrl) CONFIG.baseUrl = baseUrl;
+    if (model) CONFIG.model = model;
+  };
 
-  function getConfig() {
-    return { apiKey: OPENAI_API_KEY, baseUrl: OPENAI_BASE_URL, model: OPENAI_MODEL };
-  }
-
-  function requireKey() {
-    if (!OPENAI_API_KEY) throw new Error("Clé API OpenAI manquante.");
-  }
-
-  function condenseHistory(turns, maxChars = 1800) {
-    const joined = (turns || []).map(t => `${t.role.toUpperCase()}: ${t.content}`).join("\n");
-    return joined.length <= maxChars ? joined : "Historique condensé...\n" + joined.slice(-maxChars);
-  }
-
-  async function chatJSON({ system, user }) {
-    requireKey();
-    const body = {
-      model: OPENAI_MODEL,
-      messages: [
-        { role: "system", content: "Tu renvoies uniquement du JSON valide conforme au schéma." },
-        { role: "user", content: `${system}\n---\n${user}` }
-      ],
-      temperature: 0,
-      response_format: { type: "json_object" }
+  function headers() {
+    if (!CONFIG.apiKey) throw new Error("Code d’accès manquant.");
+    return {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${CONFIG.apiKey}`,
     };
-    const res = await fetch(`${OPENAI_BASE_URL}/chat/completions`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${OPENAI_API_KEY}`
-      },
-      body: JSON.stringify(body)
-    });
-    if (!res.ok) {
-      const txt = await res.text().catch(() => "");
-      throw new Error(`OpenAI ${res.status}: ${txt}`);
-    }
-    const json = await res.json();
-    const text = json?.choices?.[0]?.message?.content || "";
-    try {
-      return JSON.parse(text);
-    } catch {
-      const m = text.match(/\{[\s\S]*\}/);
-      if (!m) throw new Error("Réponse modèle non-JSON.");
-      return JSON.parse(m[0]);
-    }
   }
 
-  // ---------- Schémas JSON (guidage via prompt) ----------
+  async function chat(messages, { json = false, temperature = 0.3, max_tokens = 700 } = {}) {
+    const body = {
+      model: CONFIG.model,
+      messages,
+      temperature,
+      max_tokens,
+    };
+    if (json) body.response_format = { type: "json_object" };
 
-  // ⬇️ Ajouts: answered + missing_points pour rendre la décision explicite
-  const decisionSchema = {
-    type: "object",
-    additionalProperties: false,
-    properties: {
-      answered: { type: "boolean", description: "true si l'élève a effectivement répondu au cœur de la question" },
-      next_action: { enum: ["ask_followup", "next_question", "finish"] },
-      followup_question: { type: "string" },
-      missing_points: { type: "array", items: { type: "string" } },
-      reason: { type: "string" }
-    },
-    required: ["answered", "next_action"]
-  };
+    const res = await fetch(`${CONFIG.baseUrl.replace(/\/+$/,'')}/chat/completions`, {
+      method: "POST",
+      headers: headers(),
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data?.error?.message || res.statusText || "Erreur OpenAI");
+    }
+    return (data.choices?.[0]?.message?.content || "").trim();
+  }
 
-  const summarySchema = {
-    type: "object",
-    additionalProperties: false,
-    properties: {
-      objectifs: { type: "array", items: { type: "string" } },
-      priorites: { type: "array", items: { type: "string" } },
-      format_ideal: { type: "string" },
-      langue: { type: "string" },
-      niveau_actuel: { type: "string" },
-      niveau_cible: { type: "string" },
-      ambition_progression: { type: "string" },
-      projet_phrase_ultra_positive: { type: "string" },
-      meta: {
-        type: "object",
-        additionalProperties: false,
-        properties: {
-          pays_cibles: { type: "array", items: { type: "string" } },
-          depaysement_pref: { type: "string" },
-          duree_pref: { type: "string" },
-          bourse_interet: { type: "string" },
-          inquietudes_top: { type: "array", items: { type: "string" } }
-        }
-      },
-      confidence: { type: "number" }
-    },
-    required: ["objectifs","priorites","format_ideal","langue","projet_phrase_ultra_positive"]
-  };
+  function compactHistory(history, maxTurns = 8) {
+    if (!Array.isArray(history)) return "";
+    const last = history.slice(-maxTurns);
+    return last.map(t => `${t.role === "user" ? "Élève" : "Agent"}: ${t.content}`).join("\n");
+  }
 
-  // ---------- Prompts ----------
+  function safeParseJSON(s) {
+    try { return JSON.parse(s); } catch { return null; }
+  }
 
-  function decisionPrompt({ history, question, answer, hint_followup, followup_already_asked }) {
-    // ⬇️ Rubrique explicite: follow-up UNIQUEMENT si la réponse ne couvre pas le cœur.
-    const system = [
-      "Tu es un conseiller d’orientation. Tu poses une seule question à la fois.",
-      "Règle d'or: PAR DÉFAUT, passe à la question suivante.",
-      "NE POSE une question d’approfondissement QUE si l’élève n’a PAS répondu au cœur de la question (ou qu'il en a oublié une partie).",
-      "Définition de 'répondu': l'élève apporte un choix clair OU une information directement liée au point central de la question.",
-      "Cas 'pas répondu': vide, hors-sujet, 'je ne sais pas', uniquement généralités non actionnables, ou manque l'élément central (ex. pas de préférence demandée).",
-      "Si 'répondu' → answered=true et next_question.",
-      "Si 'pas répondu' → answered=false et ask_followup avec UNE question courte, ciblée, pour obtenir l’élément manquant.",
-      "Max 1 follow-up par question. N'invente pas. Garde un ton bref et bienveillant.",
-      "Retourne STRICTEMENT du JSON conforme au schéma."
-    ].join(" ");
-
-    const condensed = condenseHistory(history);
-
-    // Le hint est utilisé SEULEMENT si besoin de follow-up
-    const rules = [
-      "Utilise le hint uniquement si l'élément manque réellement.",
-      `followup_already_asked=${!!followup_already_asked}`,
-      `hint_followup="${hint_followup || ""}"`
+  // ---- Decide next step for a single question ----
+  Agent.decideNext = async ({ history = [], question, answer, hint_followup = "", followup_count = 0 }) => {
+    const sys = [
+      "Tu es un conseiller d’orientation exigeant et bienveillant pour un élève francophone.",
+      "RÈGLES GÉNÉRALES:",
+      "1) Creuse chaque question: pousse à la précision, aux exemples concrets, aux critères mesurables.",
+      "2) Réponses vagues/« je ne sais pas »/secrètes → inacceptables: reformule, propose des options, checklists, échelles (1-5), exemples.",
+      "3) Rien de secret: rappelle que l’élève doit tout dire pour bien l’orienter.",
+      "4) Si la réponse couvre correctement la question (spécifique, exploitable), passe à la suivante.",
+      "5) Ne dépasse jamais 5 sous-questions de suivi par question. Ensuite, indique qu’on avance et marque la question comme à reprendre plus tard.",
+      "Réponds UNIQUEMENT en JSON valide."
     ].join("\n");
 
-    const schemaText = JSON.stringify(decisionSchema);
+    const user = {
+      question,
+      student_answer: answer,
+      history_excerpt: compactHistory(history),
+      hint_followup,
+      followup_count,
+      max_followups: 5,
+      wanted_output: {
+        answered: "boolean (true si la question est suffisamment couverte)",
+        next_action: "ask_followup | next_question",
+        followup_question: "string (si ask_followup) — concise, ciblée, concrète, en français",
+        missing_points: "string[] — points précis manquants",
+        reason: "string — courte justification"
+      },
+      rules_reminder: [
+        "Exiger la précision et des exemples",
+        "Proposer des options/échelles si l’élève bloque",
+        "Stop à 5 follow-ups max"
+      ]
+    };
 
-    const user = [
-      `Schéma: ${schemaText}`,
-      `Contexte:\n${condensed}`,
-      `Question courante: "${question}"`,
-      `Réponse de l'élève: "${answer}"`,
-      rules
-    ].join("\n\n");
+    const out = await chat(
+      [
+        { role: "system", content: sys },
+        { role: "user", content: JSON.stringify(user) }
+      ],
+      { json: true, temperature: 0.2, max_tokens: 500 }
+    );
 
-    return { system, user };
-  }
-
-  function summarizePrompt({ history }) {
-    const system = [
-      "Tu fais une synthèse positive et fidèle du projet de l'élève pour une mindmap.",
-      "Retourne STRICTEMENT un JSON conforme au schéma fourni.",
-      "« projet_phrase_ultra_positive »: courte, claire, enthousiaste et fidèle.",
-      "N'invente rien."
-    ].join(" ");
-
-    const condensed = condenseHistory(history, 4000);
-    const schemaText = JSON.stringify(summarySchema);
-    const user = [`Schéma: ${schemaText}`, `Historique:\n${condensed}`].join("\n\n");
-    return { system, user };
-  }
-
-  // ---------- API Agent ----------
-
-  async function decideNext({ history, question, answer, hint_followup, followup_already_asked }) {
-    const { system, user } = decisionPrompt({ history, question, answer, hint_followup, followup_already_asked });
-    const res = await chatJSON({ system, user });
-
-    // ⬇️ Garde-fous côté client:
-    // - Si le modèle dit "answered === true", on force le passage à la question suivante.
-    if (res?.answered === true) {
-      return {
-        answered: true,
-        next_action: "next_question",
-        reason: res?.reason
-      };
+    const parsed = safeParseJSON(out) || {};
+    // garde-fou si le modèle renvoie hors-format
+    if (typeof parsed.answered !== "boolean") parsed.answered = false;
+    if (!parsed.next_action) parsed.next_action = parsed.answered ? "next_question" : "ask_followup";
+    if (parsed.next_action === "ask_followup" && !parsed.followup_question) {
+      parsed.followup_question = "Peux-tu préciser avec des exemples concrets et des critères mesurables ?";
     }
+    if (!Array.isArray(parsed.missing_points)) parsed.missing_points = [];
+    if (!parsed.reason) parsed.reason = parsed.answered ? "Couverture suffisante." : "Besoin de précisions ciblées.";
+    return parsed;
+  };
 
-    // - Si follow-up demandée mais déjà posée, on force le passage.
-    if (res?.next_action === "ask_followup" && followup_already_asked) {
-      return {
-        answered: false,
-        next_action: "next_question",
-        reason: "Follow-up déjà posée (limite PoC)."
-      };
-    }
+  // ---- Reformulate for revisit phase ----
+  Agent.reformulate = async ({ original_question, last_answers = [], missing_points = [] }) => {
+    const sys = "Tu reformules une question d’orientation de manière ultra-ciblée et concrète en français.";
+    const user = {
+      original_question,
+      last_answers,
+      missing_points,
+      instruction: "Produit UNE seule question courte, précise, actionnable. Pas d’intro ni d’explications."
+    };
+    const out = await chat(
+      [
+        { role: "system", content: sys },
+        { role: "user", content: JSON.stringify(user) + "\nRéponds en JSON: {\"reformulated_question\":\"...\"}" }
+      ],
+      { json: true, temperature: 0.3, max_tokens: 200 }
+    );
+    const parsed = safeParseJSON(out) || {};
+    return { reformulated_question: parsed.reformulated_question || original_question };
+  };
 
-    // - Petit garde-fou : pas de follow-up sans question
-    if (res?.next_action === "ask_followup" && !res?.followup_question) {
-      return {
-        answered: false,
-        next_action: "next_question",
-        reason: "Pas de follow-up précise fournie par le modèle."
-      };
-    }
+  // ---- Summarize full dialogue into a structured object ----
+  Agent.summarize = async ({ history = [] }) => {
+    const sys = [
+      "Tu es un assistant qui synthétise un entretien d’orientation en français.",
+      "Sois factuel, positif et opérationnel. Ignore les 'je ne sais pas'.",
+      "Respecte STRICTEMENT le schéma JSON demandé."
+    ].join("\n");
 
-    return res;
-  }
+    const schema = {
+      objectifs: "string[]",
+      priorites: "string[]",
+      format_ideal: "string",
+      langue: "string",
+      niveau_actuel: "string",
+      niveau_cible: "string",
+      ambition_progression: "string",
+      projet_phrase_ultra_positive: "string",
+      meta: {
+        pays_cibles: "string[]",
+        depaysement_pref: "string",
+        duree_pref: "string",
+        bourse_interet: "string",
+        inquietudes_top: "string[]"
+      },
+      confidence: "number (0..1)"
+    };
 
-  async function summarize({ history }) {
-    const { system, user } = summarizePrompt({ history });
-    return chatJSON({ system, user });
-  }
+    const user = {
+      transcript_excerpt: compactHistory(history, 18),
+      required_schema: schema
+    };
 
-  return { configure, getConfig, decideNext, summarize };
+    const out = await chat(
+      [
+        { role: "system", content: sys },
+        { role: "user", content: JSON.stringify(user) + "\nRéponds en JSON EXACTEMENT au schéma ci-dessus." }
+      ],
+      { json: true, temperature: 0.2, max_tokens: 900 }
+    );
+    const parsed = safeParseJSON(out) || {};
+    // garde-fou
+    parsed.objectifs ||= [];
+    parsed.priorites ||= [];
+    parsed.meta ||= {};
+    parsed.meta.pays_cibles ||= [];
+    parsed.meta.inquietudes_top ||= [];
+    parsed.confidence = Math.max(0, Math.min(1, Number(parsed.confidence || 0.8)));
+    return parsed;
+  };
+
+  window.Agent = Agent;
 })();

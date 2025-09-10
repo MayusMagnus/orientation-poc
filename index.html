@@ -8,13 +8,11 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Orientation</title>
 
-  <!-- Version globale à incrémenter à chaque déploiement -->
-  <script>window.APP_VERSION="2025-09-10-09";</script>
+  <!-- ⬆️ Incrémente à chaque déploiement -->
+  <script>window.APP_VERSION="2025-09-10-12";</script>
 
-  <!-- Styles avec cache-busting -->
-  <link rel="stylesheet" href="./styles.css?v=2025-09-10-09" />
+  <link rel="stylesheet" href="./styles.css?v=2025-09-10-12" />
 
-  <!-- Mermaid (mindmap) -->
   <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
   <script>mermaid.initialize({ startOnLoad: false, theme: 'neutral' });</script>
 </head>
@@ -25,13 +23,11 @@
       <button id="btnReset" class="ghost small" title="Réinitialiser">↺</button>
     </div>
     <div class="actions">
-      <!-- Logo à droite -->
-      <img src="./assets/renard_univia.png?v=2025-09-10-09" alt="Univia" class="logo">
+      <img src="./assets/renard_univia.png?v=2025-09-10-12" alt="Univia" class="logo">
     </div>
   </header>
 
   <main id="app" class="stage-wrap">
-    <!-- Écran de bienvenue (plein) -->
     <section class="stage card" id="welcomeStage">
       <div class="welcome-hero fade-in">
         <h1>Bienvenue dans le module <span>Orientation</span></h1>
@@ -39,14 +35,11 @@
       </div>
     </section>
 
-    <!-- Carte principale : une seule question (masquée tant que le code n’a pas été saisi) -->
     <section class="stage card hidden" id="questionStage">
       <div class="progress"><div id="progressBar"></div></div>
-
       <div id="questionCard" class="question-card">
         <div id="questionText" class="question"></div>
       </div>
-
       <div class="composer">
         <textarea id="input" placeholder="Écris ta réponse ici…"></textarea>
         <div class="buttons">
@@ -57,74 +50,40 @@
       </div>
     </section>
 
-    <!-- Section synthèse (affichée à la fin) -->
     <section class="stage card hidden" id="summaryStage">
       <h2 class="section-title">🧠 Synthèse & Mindmap</h2>
       <div id="summaryCards" class="grid"></div>
-      <div class="mindmap-wrap">
-        <div id="mindmap"></div>
-      </div>
-      <div class="mindmap-actions">
-        <button id="btnExportSvg" class="ghost">Exporter SVG</button>
-      </div>
+      <div class="mindmap-wrap"><div id="mindmap"></div></div>
+      <div class="mindmap-actions"><button id="btnExportSvg" class="ghost">Exporter SVG</button></div>
     </section>
   </main>
 
-  <!-- Modale Code d'accès (clé masquée) -->
+  <!-- Modale Code d'accès -->
   <dialog id="apiModal">
     <form method="dialog" class="modal">
       <h3>🔒 Code d’accès requis</h3>
-      <p class="muted">
-        Saisis le code fourni pour utiliser l’outil.
-        Il n’est pas enregistré dans le code du site.
-      </p>
+      <p class="muted">Saisis le code fourni pour utiliser l’outil. Il n’est pas enregistré dans le code du site.</p>
       <label>Code</label>
       <input type="password" id="apiKeyInput" placeholder="Entrer votre code" />
-      <div class="row">
-        <label><input type="checkbox" id="rememberKey" /> Mémoriser ce code dans cet onglet</label>
-      </div>
-
-      <!-- Champs techniques cachés (compat JS) -->
-      <div class="row" style="display:none">
-        <label>Endpoint</label>
-        <input type="text" id="apiBaseInput" value="https://api.openai.com/v1" />
-      </div>
-      <div class="row" style="display:none">
-        <label>Modèle</label>
-        <input type="text" id="apiModelInput" value="gpt-4o-mini" />
-      </div>
-
-      <menu>
-        <button value="cancel" class="ghost">Annuler</button>
-        <button value="ok" id="apiSaveBtn">Continuer</button>
-      </menu>
+      <div class="row"><label><input type="checkbox" id="rememberKey" /> Mémoriser ce code dans cet onglet</label></div>
+      <div class="row" style="display:none"><label>Endpoint</label><input type="text" id="apiBaseInput" value="https://api.openai.com/v1" /></div>
+      <div class="row" style="display:none"><label>Modèle</label><input type="text" id="apiModelInput" value="gpt-4o-mini" /></div>
+      <menu><button value="cancel" class="ghost">Annuler</button><button value="ok" id="apiSaveBtn">Continuer</button></menu>
     </form>
   </dialog>
 
-  <!-- Modale Réglages (conservée, sans bouton dédié) -->
   <dialog id="settingsModal">
     <form method="dialog" class="modal">
       <h3>⚙️ Réglages</h3>
-      <div class="row">
-        <label>Endpoint</label>
-        <input type="text" id="settingsApiBase" />
-      </div>
-      <div class="row">
-        <label>Modèle</label>
-        <input type="text" id="settingsApiModel" />
-      </div>
-      <menu>
-        <button value="cancel" class="ghost">Fermer</button>
-        <button value="ok" id="settingsSaveBtn">Enregistrer</button>
-      </menu>
+      <div class="row"><label>Endpoint</label><input type="text" id="settingsApiBase" /></div>
+      <div class="row"><label>Modèle</label><input type="text" id="settingsApiModel" /></div>
+      <menu><button value="cancel" class="ghost">Fermer</button><button value="ok" id="settingsSaveBtn">Enregistrer</button></menu>
     </form>
   </dialog>
 
-  <!-- Scripts versionnés -->
-  <script src="./scripts/agent.js?v=2025-09-10-09"></script>
-  <script src="./scripts/app.js?v=2025-09-10-09"></script>
+  <script src="./scripts/agent.js?v=2025-09-10-12"></script>
+  <script src="./scripts/app.js?v=2025-09-10-12"></script>
 
-  <!-- Service Worker : recharge automatiquement quand une nouvelle version est dispo -->
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
@@ -132,12 +91,10 @@
           .then(() => {
             let refreshing = false;
             navigator.serviceWorker.addEventListener('controllerchange', () => {
-              if (refreshing) return;
-              refreshing = true;
-              location.reload();
+              if (refreshing) return; refreshing = true; location.reload();
             });
           })
-          .catch(() => {/* silencieux pour un PoC */});
+          .catch(() => {});
       });
     }
   </script>
