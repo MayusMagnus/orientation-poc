@@ -111,10 +111,10 @@ window.Agent = (function () {
   function decisionPrompt({ history, question, answer, hint_followup, followup_already_asked }) {
     // ⬇️ Rubrique explicite: follow-up UNIQUEMENT si la réponse ne couvre pas le cœur.
     const system = [
-      "Tu es un conseiller d’orientation. Une seule question à la fois.",
+      "Tu es un conseiller d’orientation. Tu poses une seule question à la fois.",
       "Règle d'or: PAR DÉFAUT, passe à la question suivante.",
-      "NE POSE une question d’approfondissement QUE si l’élève n’a PAS répondu au cœur de la question.",
-      "Définition de 'répondu': l'élève apporte un choix clair OU une information directement liée au point central de la question (même succincte).",
+      "NE POSE une question d’approfondissement QUE si l’élève n’a PAS répondu au cœur de la question (ou qu'il en a oublié une partie).",
+      "Définition de 'répondu': l'élève apporte un choix clair OU une information directement liée au point central de la question.",
       "Cas 'pas répondu': vide, hors-sujet, 'je ne sais pas', uniquement généralités non actionnables, ou manque l'élément central (ex. pas de préférence demandée).",
       "Si 'répondu' → answered=true et next_question.",
       "Si 'pas répondu' → answered=false et ask_followup avec UNE question courte, ciblée, pour obtenir l’élément manquant.",
