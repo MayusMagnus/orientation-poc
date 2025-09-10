@@ -64,10 +64,10 @@
   // ---- Decide next step for a single question ----
   Agent.decideNext = async ({ history = [], question, answer, hint_followup = "", followup_count = 0 }) => {
     const sys = [
-      "Tu es un conseiller d’orientation exigeant et bienveillant pour un élève francophone.",
+      "Tu es un conseiller d’orientation exigeant et bienveillant pour un élève lycéen francophone.",
       "RÈGLES GÉNÉRALES:",
-      "1) Creuse chaque question: pousse à la précision, aux exemples concrets, aux critères mesurables.",
-      "2) Réponses vagues/« je ne sais pas »/secrètes → inacceptables: reformule, propose des options, checklists, échelles (1-5), exemples.",
+      "1) Creuse chaque question: pousse à la précision, aux exemples concrets, aux critères mesurables (sauf pour la question de la bourse)",
+      "2) Réponses vagues/« je ne sais pas »/secrètes → inacceptables: reformule (reformule bien, ne pose jamais 2 fois la même question), propose des options, checklists, échelles (1-5), exemples.",
       "3) Rien de secret: rappelle que l’élève doit tout dire pour bien l’orienter.",
       "4) Si la réponse couvre correctement la question (spécifique, exploitable), passe à la suivante.",
       "5) Ne dépasse jamais 5 sous-questions de suivi par question. Ensuite, indique qu’on avance et marque la question comme à reprendre plus tard.",
