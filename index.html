@@ -6,13 +6,13 @@
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Orientation – PoC</title>
+  <title>Orientation</title>
 
   <!-- Version globale à incrémenter à chaque déploiement -->
-  <script>window.APP_VERSION="2025-09-10-06";</script>
+  <script>window.APP_VERSION="2025-09-10-08";</script>
 
   <!-- Styles avec cache-busting -->
-  <link rel="stylesheet" href="./styles.css?v=2025-09-10-06" />
+  <link rel="stylesheet" href="./styles.css?v=2025-09-10-08" />
 
   <!-- Mermaid (mindmap) -->
   <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
@@ -20,19 +20,30 @@
 </head>
 <body>
   <header class="topbar minimal">
-    <div class="brand">🎒 Orientation – PoC</div>
+    <div class="brand">
+      <span class="brand-title">🎒 Orientation</span>
+      <button id="btnReset" class="ghost small" title="Réinitialiser">↺</button>
+    </div>
     <div class="actions">
-      <button id="btnSettings" class="ghost" title="Réglages">⚙️</button>
-      <button id="btnReset" class="ghost" title="Réinitialiser">↺</button>
+      <!-- Logo à droite -->
+      <img src="./assets/renard_univia.png?v=2025-09-10-08" alt="Univia" class="logo">
     </div>
   </header>
 
   <main id="app" class="stage-wrap">
-    <!-- Carte principale : une seule question -->
-    <section class="stage card" id="questionStage">
+    <!-- Écran de bienvenue (plein) -->
+    <section class="stage card" id="welcomeStage">
+      <div class="welcome-hero fade-in">
+        <h1>Bienvenue dans le module <span>Orientation</span></h1>
+        <p class="muted">Saisis ton code d’accès pour commencer.</p>
+      </div>
+    </section>
+
+    <!-- Carte principale : une seule question (masquée tant que le code n’a pas été saisi) -->
+    <section class="stage card hidden" id="questionStage">
       <div class="progress"><div id="progressBar"></div></div>
 
-      <div id="questionCard" class="question-card fade-in">
+      <div id="questionCard" class="question-card">
         <div id="questionText" class="question"></div>
       </div>
 
@@ -58,9 +69,6 @@
       </div>
     </section>
   </main>
-
-  <!-- Toast de bienvenue -->
-  <div id="welcomeToast" class="toast hidden">Bienvenue dans le module Oreientation</div>
 
   <!-- Modale Code d'accès (clé masquée) -->
   <dialog id="apiModal">
@@ -93,7 +101,7 @@
     </form>
   </dialog>
 
-  <!-- Modale Réglages -->
+  <!-- Modale Réglages (conservée, sans bouton dédié) -->
   <dialog id="settingsModal">
     <form method="dialog" class="modal">
       <h3>⚙️ Réglages</h3>
@@ -113,8 +121,8 @@
   </dialog>
 
   <!-- Scripts versionnés -->
-  <script src="./scripts/agent.js?v=2025-09-10-06"></script>
-  <script src="./scripts/app.js?v=2025-09-10-06"></script>
+  <script src="./scripts/agent.js?v=2025-09-10-08"></script>
+  <script src="./scripts/app.js?v=2025-09-10-08"></script>
 
   <!-- Service Worker : recharge automatiquement quand une nouvelle version est dispo -->
   <script>
@@ -126,7 +134,7 @@
             navigator.serviceWorker.addEventListener('controllerchange', () => {
               if (refreshing) return;
               refreshing = true;
-              location.reload(); // recharge quand le nouveau SW prend le contrôle
+              location.reload();
             });
           })
           .catch(() => {/* silencieux pour un PoC */});

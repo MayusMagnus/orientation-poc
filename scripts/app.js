@@ -1,6 +1,6 @@
 // scripts/app.js
 //
-// UI épurée : une seule question à l'écran, transitions en fondu, toast de bienvenue.
+// UI épurée : écran de bienvenue puis transition en fondu vers la 1re question.
 
 (async function () {
   // ---- DOM ----
@@ -14,7 +14,7 @@
   const btnFinish = document.getElementById("btnFinish");
   const btnExportSvg = document.getElementById("btnExportSvg");
   const btnReset = document.getElementById("btnReset");
-  const btnSettings = document.getElementById("btnSettings");
+  const btnSettings = document.getElementById("btnSettings"); // peut être null (bouton retiré)
 
   const apiModal = document.getElementById("apiModal");
   const apiKeyInput = document.getElementById("apiKeyInput");
@@ -30,19 +30,16 @@
 
   const summaryStage = document.getElementById("summaryStage");
   const questionStage = document.getElementById("questionStage");
+  const welcomeStage = document.getElementById("welcomeStage");
   const summaryCards = document.getElementById("summaryCards");
-  const welcomeToast = document.getElementById("welcomeToast");
 
   // ---- State ----
   const state = {
     questions: [],
     idx: 0,
     followupAsked: false,
-    // historique invisible (pour l'agent)
     history: [],
-    // synthèse
     summary: null,
-    // logique tentatives et reprise (déjà implémentée précédemment)
     attempts: {},
     unsatisfied: [],
     phase: "main",        // "main" | "revisit" | "done"
@@ -81,7 +78,7 @@
     input.disabled = !on; btnSend.disabled = !on; btnSkip.disabled = !on; btnFinish.disabled = !on;
   }
 
-  // Fondu sortant → maj → fondu entrant
+  // Fondu sortant → maj → fondu entrant (pour le texte de la carte question)
   function swapQuestion(text) {
     return new Promise(resolve => {
       questionCard.classList.remove("fade-in");
@@ -102,27 +99,40 @@
     questionText.textContent = text;
   }
 
-  function showCurrentQuestion() {
+  function questionLabel() {
     const q = currentQuestion();
-    if (!q) return;
-    const label = `Q${state.idx + 1}: ${q.text}`;
-    logAssistant(label);
-    return swapQuestion(label).then(() => setProgress());
+    return `Q${state.idx + 1}: ${q.text}`;
   }
 
-  function showRevisitQuestion(text) {
-    const label = `🔁 ${text}`;
+  async function showCurrentQuestion() {
+    const label = questionLabel();
     logAssistant(label);
-    return swapQuestion(label);
+    await swapQuestion(label);
+    setProgress();
   }
 
-  function showToast() {
-    welcomeToast.classList.remove("hidden");
-    welcomeToast.classList.add("show");
-    setTimeout(() => {
-      welcomeToast.classList.remove("show");
-      setTimeout(() => welcomeToast.classList.add("hidden"), 2000);
-    }, 2600);
+  async function transitionWelcomeToQuestion() {
+    // 1) Fade-out de l'écran de bienvenue
+    await new Promise(resolve => {
+      welcomeStage.classList.add("fade-out");
+      welcomeStage.addEventListener("animationend", function handler(){
+        welcomeStage.removeEventListener("animationend", handler);
+        welcomeStage.classList.add("hidden");
+        welcomeStage.classList.remove("fade-out");
+        resolve();
+      }, { once:true });
+    });
+
+    // 2) Afficher la carte question (fade-in)
+    questionStage.classList.remove("hidden");
+    questionStage.classList.add("fade-in");
+    setTimeout(() => questionStage.classList.remove("fade-in"), 400);
+
+    // 3) Injecter et afficher la 1re question
+    const label = questionLabel();
+    logAssistant(label);
+    showQuestionNow(label);
+    setProgress();
   }
 
   function escapeMermaid(s) {
@@ -179,16 +189,7 @@
     }
   }
 
-  function exportSVG() {
-    const svg = document.querySelector("#mindmap svg");
-    if (!svg) return alert("Mindmap non disponible.");
-    const blob = new Blob([svg.outerHTML], { type: "image/svg+xml" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a"); a.href = url; a.download = "mindmap.svg"; a.click();
-    URL.revokeObjectURL(url);
-  }
-
-  // ---- Phase de reprise (inchangée fonctionnellement) ----
+  // ---- Phase de reprise (inchangée) ----
   function startRevisitPhase() {
     if (!state.unsatisfied.length) {
       return finalizeSummary();
@@ -196,7 +197,6 @@
     state.phase = "revisit";
     state.revisitQueue = state.unsatisfied.map(x => x.id);
     saveState();
-    // Pas d'historique affiché, juste la prochaine question reformulée
     askNextRevisit();
   }
 
@@ -219,11 +219,13 @@
       const reformulated = ref.reformulated_question || q.text;
       state.currentRevisit = { id: qid, text: reformulated };
       saveState();
-      await showRevisitQuestion(reformulated);
+      await swapQuestion(`🔁 ${reformulated}`);
+      logAssistant(`🔁 ${reformulated}`);
     } catch {
       state.currentRevisit = { id: qid, text: q.text };
       saveState();
-      await showRevisitQuestion(q.text);
+      await swapQuestion(`🔁 ${q.text}`);
+      logAssistant(`🔁 ${q.text}`);
     }
   }
 
@@ -240,8 +242,9 @@
       state.summary = sum; saveState();
       fillSummaryCards(sum);
       await renderMindmap(sum);
-      // Afficher la section synthèse, masquer la question
+      // Afficher la section synthèse, masquer la question + bienvenue
       questionStage.classList.add("hidden");
+      welcomeStage.classList.add("hidden");
       summaryStage.classList.remove("hidden");
     } catch (e) {
       alert(e.message || e);
@@ -265,7 +268,6 @@
           history: state.history, question: qText, answer: text,
           hint_followup: "", followup_already_asked: true
         });
-        // Avance sans s'attarder
         logAssistant(res?.answered === true ? "Merci, c’est clair. ✅" : "Merci, je note ta réponse. ✔️");
         return await completeCurrentRevisit();
       }
@@ -367,7 +369,7 @@
     settingsModal.showModal();
   }
 
-  apiSaveBtn.addEventListener("click", () => {
+  apiSaveBtn.addEventListener("click", async () => {
     const key = apiKeyInput.value.trim();
     if (!key) { alert("Code requis."); return; }
     const base = (apiBaseInput?.value?.trim()) || sessionStorage.getItem("OPENAI_BASE") || "https://api.openai.com/v1";
@@ -376,8 +378,9 @@
     if (rememberKey.checked) sessionStorage.setItem("OPENAI_KEY", key);
     sessionStorage.setItem("OPENAI_BASE", base);
     sessionStorage.setItem("OPENAI_MODEL", model);
-    // Toast de bienvenue
-    showToast();
+
+    // Transition de bienvenue -> 1re question
+    await transitionWelcomeToQuestion();
   });
 
   settingsSaveBtn.addEventListener("click", () => {
@@ -396,7 +399,9 @@
     location.reload();
   });
 
-  btnSettings.addEventListener("click", openSettings);
+  // Le bouton réglages peut ne pas exister : protège l'écouteur
+  btnSettings?.addEventListener("click", openSettings);
+
   btnSend.addEventListener("click", onSend);
   input.addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); onSend(); }});
   btnSkip.addEventListener("click", onSkip);
@@ -428,20 +433,22 @@
   const base = sessionStorage.getItem("OPENAI_BASE") || "https://api.openai.com/v1";
   const model = sessionStorage.getItem("OPENAI_MODEL") || "gpt-4o-mini";
   if (key) window.Agent.configure({ apiKey:key, baseUrl:base, model });
-  if (!key && typeof apiModal?.showModal === "function") apiModal.showModal();
 
-  // Afficher la question actuelle
-  if (state.phase === "revisit" && state.currentRevisit) {
-    await showRevisitQuestion(state.currentRevisit.text);
-  } else if (state.questions.length) {
-    if (state.history.length === 0) {
-      showQuestionNow(`Q${state.idx + 1}: ${state.questions[state.idx].text}`);
-      logAssistant(`Q${state.idx + 1}: ${state.questions[state.idx].text}`);
-      setProgress();
+  // État initial :
+  if (state.history.length > 0 || key) {
+    welcomeStage.classList.add("hidden");
+    questionStage.classList.remove("hidden");
+    if (state.summary) {
+      questionStage.classList.add("hidden");
+      summaryStage.classList.remove("hidden");
+    } else if (state.phase === "revisit" && state.currentRevisit) {
+      questionText.textContent = `🔁 ${state.currentRevisit.text}`;
     } else {
-      // Si historique, montrer la question actuelle sans rejouer tout
-      showQuestionNow(state.history.filter(h => h.role==="assistant").slice(-1)[0]?.content || `Q${state.idx + 1}: ${state.questions[state.idx].text}`);
+      const lastAssistant = state.history.filter(h => h.role==="assistant").slice(-1)[0]?.content;
+      questionText.textContent = lastAssistant || questionLabel();
       setProgress();
     }
+  } else {
+    if (typeof apiModal?.showModal === "function") apiModal.showModal();
   }
 })();

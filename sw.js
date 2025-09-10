@@ -9,7 +9,8 @@ const CORE_ASSETS = [
   './styles.css?v=' + VERSION,
   './scripts/agent.js?v=' + VERSION,
   './scripts/app.js?v=' + VERSION,
-  './data/questions.json?v=' + VERSION
+  './data/questions.json?v=' + VERSION,
+  './assets/renard_univia.png?v=' + VERSION
 ];
 
 self.addEventListener('install', (event) => {
@@ -53,7 +54,7 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Assets (CSS/JS/JSON…)
+  // Assets (CSS/JS/JSON/PNG…)
   event.respondWith((async () => {
     const cached = await caches.match(req);
     if (cached) {
