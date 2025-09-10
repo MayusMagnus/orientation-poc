@@ -55,30 +55,37 @@
     </aside>
   </main>
 
-  <!-- Modale Clé API -->
+  <!-- Modale Code d'accès (clé masquée) -->
   <dialog id="apiModal">
     <form method="dialog" class="modal">
-      <h3>🔑 Clé API OpenAI requise</h3>
-      <p class="muted">Elle n'est jamais sauvegardée dans le code. Option : mémoriser dans cet onglet.</p>
-      <label>Clé (sk-...)</label>
-      <input type="password" id="apiKeyInput" placeholder="sk-..." />
+      <h3>🔒 Code d’accès requis</h3>
+      <p class="muted">
+        Saisis le code fourni pour utiliser l’outil.
+        Il n’est pas enregistré dans le code du site.
+      </p>
+      <label>Code</label>
+      <input type="password" id="apiKeyInput" placeholder="Entrer votre code" />
       <div class="row">
-        <label><input type="checkbox" id="rememberKey" /> Mémoriser dans cet onglet (sessionStorage)</label>
+        <label><input type="checkbox" id="rememberKey" /> Mémoriser ce code dans cet onglet</label>
       </div>
-      <div class="row">
+
+      <!-- Champs techniques cachés (conservent la compatibilité avec app.js) -->
+      <div class="row" style="display:none">
         <label>Endpoint</label>
         <input type="text" id="apiBaseInput" value="https://api.openai.com/v1" />
       </div>
-      <div class="row">
+      <div class="row" style="display:none">
         <label>Modèle</label>
         <input type="text" id="apiModelInput" value="gpt-4o-mini" />
       </div>
+
       <menu>
         <button value="cancel" class="ghost">Annuler</button>
-        <button value="ok" id="apiSaveBtn">Se connecter</button>
+        <button value="ok" id="apiSaveBtn">Continuer</button>
       </menu>
     </form>
   </dialog>
+
 
   <!-- Modale Réglages -->
   <dialog id="settingsModal">

@@ -378,12 +378,17 @@
 
   document.getElementById("apiSaveBtn")?.addEventListener("click", () => {
     const key = apiKeyInput.value.trim();
-    const base = apiBaseInput.value.trim() || "https://api.openai.com/v1";
-    const model = apiModelInput.value.trim() || "gpt-4o-mini";
-    if (!key.startsWith("sk-")) {
-      alert("Clé invalide (doit commencer par sk-).");
+
+    // ✅ Nouvelle validation "code" (ne mentionne plus sk- ni OpenAI)
+    if (!key) {
+      alert("Code requis.");
       return;
     }
+
+    // Valeurs techniques (restent cachées dans la modale)
+    const base = (apiBaseInput?.value?.trim()) || sessionStorage.getItem("OPENAI_BASE") || "https://api.openai.com/v1";
+    const model = (apiModelInput?.value?.trim()) || sessionStorage.getItem("OPENAI_MODEL") || "gpt-4o-mini";
+
     window.Agent.configure({ apiKey: key, baseUrl: base, model });
     if (rememberKey.checked) sessionStorage.setItem("OPENAI_KEY", key);
     sessionStorage.setItem("OPENAI_BASE", base);
