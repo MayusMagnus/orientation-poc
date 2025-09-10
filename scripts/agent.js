@@ -64,12 +64,12 @@ window.Agent = (function () {
 
   // ---------- Schémas JSON (guidage via prompt) ----------
 
-  // Décision par étape (strict)
+  // ⬇️ Ajouts: answered + missing_points pour rendre la décision explicite
   const decisionSchema = {
     type: "object",
     additionalProperties: false,
     properties: {
-      answered: { type: "boolean", description: "true si l'élève a répondu au cœur de la question" },
+      answered: { type: "boolean", description: "true si l'élève a effectivement répondu au cœur de la question" },
       next_action: { enum: ["ask_followup", "next_question", "finish"] },
       followup_question: { type: "string" },
       missing_points: { type: "array", items: { type: "string" } },
@@ -106,33 +106,25 @@ window.Agent = (function () {
     required: ["objectifs","priorites","format_ideal","langue","projet_phrase_ultra_positive"]
   };
 
-  // ✅ NOUVEAU : schéma pour reformuler une question insatisfaisante (phase de reprise)
-  const reformulateSchema = {
-    type: "object",
-    additionalProperties: false,
-    properties: {
-      reformulated_question: { type: "string" },
-      reason: { type: "string" }
-    },
-    required: ["reformulated_question"]
-  };
-
   // ---------- Prompts ----------
 
   function decisionPrompt({ history, question, answer, hint_followup, followup_already_asked }) {
+    // ⬇️ Rubrique explicite: follow-up UNIQUEMENT si la réponse ne couvre pas le cœur.
     const system = [
       "Tu es un conseiller d’orientation. Une seule question à la fois.",
       "Règle d'or: PAR DÉFAUT, passe à la question suivante.",
       "NE POSE une question d’approfondissement QUE si l’élève n’a PAS répondu au cœur de la question.",
-      "Définition 'répondu' = l'élève donne un choix clair OU une info liée au point central (même succincte).",
-      "Cas 'pas répondu' = vide, hors-sujet, 'je ne sais pas', généralités non actionnables, ou élément central manquant.",
-      "Si 'répondu' → answered=true & next_question.",
-      "Si 'pas répondu' → answered=false & ask_followup avec UNE question courte et ciblée.",
-      "Max 1 follow-up par question. Garde un ton bref et bienveillant.",
+      "Définition de 'répondu': l'élève apporte un choix clair OU une information directement liée au point central de la question (même succincte).",
+      "Cas 'pas répondu': vide, hors-sujet, 'je ne sais pas', uniquement généralités non actionnables, ou manque l'élément central (ex. pas de préférence demandée).",
+      "Si 'répondu' → answered=true et next_question.",
+      "Si 'pas répondu' → answered=false et ask_followup avec UNE question courte, ciblée, pour obtenir l’élément manquant.",
+      "Max 1 follow-up par question. N'invente pas. Garde un ton bref et bienveillant.",
       "Retourne STRICTEMENT du JSON conforme au schéma."
     ].join(" ");
 
     const condensed = condenseHistory(history);
+
+    // Le hint est utilisé SEULEMENT si besoin de follow-up
     const rules = [
       "Utilise le hint uniquement si l'élément manque réellement.",
       `followup_already_asked=${!!followup_already_asked}`,
@@ -140,6 +132,7 @@ window.Agent = (function () {
     ].join("\n");
 
     const schemaText = JSON.stringify(decisionSchema);
+
     const user = [
       `Schéma: ${schemaText}`,
       `Contexte:\n${condensed}`,
@@ -165,41 +158,40 @@ window.Agent = (function () {
     return { system, user };
   }
 
-  // ✅ NOUVEAU : prompt de reformulation finale (phase de reprise)
-  function reformulatePrompt({ original_question, last_answers, missing_points }) {
-    const system = [
-      "Tu reformules UNE SEULE et même question, concise et claire, pour obtenir le point manquant.",
-      "Cible précisément les éléments manquants. Ton but est d'aider l'élève à donner une réponse actionnable.",
-      "Retourne STRICTEMENT un JSON conforme au schéma fourni."
-    ].join(" ");
-
-    const schemaText = JSON.stringify(reformulateSchema);
-    const user = [
-      `Schéma: ${schemaText}`,
-      `Question initiale: "${original_question}"`,
-      last_answers?.length ? `Dernières réponses de l'élève:\n- ${last_answers.join("\n- ")}` : "Dernières réponses de l'élève: (aucune)",
-      (missing_points?.length ? `Points manquants identifiés:\n- ${missing_points.join("\n- ")}` : "Points manquants: (non précisés)")
-    ].join("\n\n");
-
-    return { system, user };
-  }
-
   // ---------- API Agent ----------
 
   async function decideNext({ history, question, answer, hint_followup, followup_already_asked }) {
     const { system, user } = decisionPrompt({ history, question, answer, hint_followup, followup_already_asked });
     const res = await chatJSON({ system, user });
 
-    // Garde-fous côté client:
+    // ⬇️ Garde-fous côté client:
+    // - Si le modèle dit "answered === true", on force le passage à la question suivante.
     if (res?.answered === true) {
-      return { answered: true, next_action: "next_question", reason: res?.reason };
+      return {
+        answered: true,
+        next_action: "next_question",
+        reason: res?.reason
+      };
     }
+
+    // - Si follow-up demandée mais déjà posée, on force le passage.
     if (res?.next_action === "ask_followup" && followup_already_asked) {
-      return { answered: false, next_action: "next_question", reason: "Follow-up déjà posée (limite PoC)." };
+      return {
+        answered: false,
+        next_action: "next_question",
+        reason: "Follow-up déjà posée (limite PoC)."
+      };
     }
+
+    // - Petit garde-fou : pas de follow-up sans question
     if (res?.next_action === "ask_followup" && !res?.followup_question) {
-      return { answered: false, next_action: "next_question", reason: "Pas de follow-up précise fournie par le modèle." };
+      return {
+        answered: false,
+        next_action: "next_question",
+        reason: "Pas de follow-up précise fournie par le modèle."
+      };
     }
+
     return res;
   }
 
@@ -208,11 +200,5 @@ window.Agent = (function () {
     return chatJSON({ system, user });
   }
 
-  // ✅ NOUVEAU : reformulation de question pour la phase de reprise
-  async function reformulate({ original_question, last_answers, missing_points }) {
-    const { system, user } = reformulatePrompt({ original_question, last_answers, missing_points });
-    return chatJSON({ system, user }); // { reformulated_question, reason? }
-  }
-
-  return { configure, getConfig, decideNext, summarize, reformulate };
+  return { configure, getConfig, decideNext, summarize };
 })();

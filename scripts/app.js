@@ -1,10 +1,13 @@
 // scripts/app.js
 //
-// Logique UI: charge les questions, gère l'état, parle à window.Agent, rend la mindmap.
+// UI épurée : une seule question à l'écran, transitions en fondu, toast de bienvenue.
 
 (async function () {
-  // --- DOM refs ---
-  const chatlog = document.getElementById("chatlog");
+  // ---- DOM ----
+  const questionText = document.getElementById("questionText");
+  const questionCard = document.getElementById("questionCard");
+  const progressBar = document.getElementById("progressBar");
+
   const input = document.getElementById("input");
   const btnSend = document.getElementById("btnSend");
   const btnSkip = document.getElementById("btnSkip");
@@ -12,8 +15,6 @@
   const btnExportSvg = document.getElementById("btnExportSvg");
   const btnReset = document.getElementById("btnReset");
   const btnSettings = document.getElementById("btnSettings");
-  const progressBar = document.getElementById("progressBar");
-  const summaryCards = document.getElementById("summaryCards");
 
   const apiModal = document.getElementById("apiModal");
   const apiKeyInput = document.getElementById("apiKeyInput");
@@ -27,37 +28,32 @@
   const settingsApiModel = document.getElementById("settingsApiModel");
   const settingsSaveBtn = document.getElementById("settingsSaveBtn");
 
-  // --- State ---
+  const summaryStage = document.getElementById("summaryStage");
+  const questionStage = document.getElementById("questionStage");
+  const summaryCards = document.getElementById("summaryCards");
+  const welcomeToast = document.getElementById("welcomeToast");
+
+  // ---- State ----
   const state = {
+    questions: [],
     idx: 0,
     followupAsked: false,
+    // historique invisible (pour l'agent)
     history: [],
-    finished: false,
+    // synthèse
     summary: null,
-    questions: [],
-    // ✅ NOUVEAU :
-    attempts: {},         // { [questionId]: number }
-    unsatisfied: [],      // [{ id, questionText, missing_points?: string[], last_answers?: string[] }]
+    // logique tentatives et reprise (déjà implémentée précédemment)
+    attempts: {},
+    unsatisfied: [],
     phase: "main",        // "main" | "revisit" | "done"
-    revisitQueue: [],     // array of question ids to revisit
-    currentRevisit: null  // { id, text } reformulated question currently asked
+    revisitQueue: [],
+    currentRevisit: null
   };
 
+  // ---- Helpers ----
   function saveState() {
-    sessionStorage.setItem("orientation_state", JSON.stringify({
-      idx: state.idx,
-      followupAsked: state.followupAsked,
-      history: state.history,
-      finished: state.finished,
-      summary: state.summary,
-      attempts: state.attempts,
-      unsatisfied: state.unsatisfied,
-      phase: state.phase,
-      revisitQueue: state.revisitQueue,
-      currentRevisit: state.currentRevisit
-    }));
+    sessionStorage.setItem("orientation_state", JSON.stringify(state));
   }
-
   function loadState() {
     try {
       const raw = sessionStorage.getItem("orientation_state");
@@ -67,46 +63,66 @@
 
   function setProgress() {
     const total = state.questions.length || 1;
-    const basePct = Math.min(100, Math.round((state.idx / total) * 100));
-    // En phase de reprise, on peut afficher une légère progression fixe :
-    progressBar.style.width = (state.phase === "main" ? basePct : 100) + "%";
+    const pct = state.phase === "main"
+      ? Math.min(100, Math.round((state.idx / total) * 100))
+      : 100;
+    progressBar.style.width = pct + "%";
   }
 
   function currentQuestion() {
     return state.questions[state.idx];
   }
 
-  function getQuestionById(id) {
-    return state.questions.find(q => q.id === id);
-  }
-
-  function appendMsg(role, text) {
-    const div = document.createElement("div");
-    div.className = `msg ${role}`;
-    div.textContent = text;
-    chatlog.appendChild(div);
-    chatlog.scrollTop = chatlog.scrollHeight;
-    state.history.push({ role, content: text });
-    saveState();
-  }
-
-  function showCurrentQuestion() {
-    const q = currentQuestion();
-    if (!q) return;
-    appendMsg("assistant", `Q${state.idx + 1}: ${q.text}`);
-    setProgress();
-  }
+  // Historique interne (non affiché)
+  function logAssistant(text){ state.history.push({ role:"assistant", content:text }); saveState(); }
+  function logUser(text){ state.history.push({ role:"user", content:text }); saveState(); }
 
   function setComposerEnabled(on) {
     input.disabled = !on; btnSend.disabled = !on; btnSkip.disabled = !on; btnFinish.disabled = !on;
   }
 
-  function showError(err) {
-    const div = document.createElement("div");
-    div.className = "msg assistant";
-    div.innerHTML = `⚠️ <span class="error">${(err && err.message) ? err.message : err}</span>`;
-    chatlog.appendChild(div);
-    chatlog.scrollTop = chatlog.scrollHeight;
+  // Fondu sortant → maj → fondu entrant
+  function swapQuestion(text) {
+    return new Promise(resolve => {
+      questionCard.classList.remove("fade-in");
+      questionCard.classList.add("fade-out");
+      questionCard.addEventListener("animationend", function handler() {
+        questionCard.removeEventListener("animationend", handler);
+        questionText.textContent = text;
+        questionCard.classList.remove("fade-out");
+        questionCard.classList.add("fade-in");
+        resolve();
+      }, { once:true });
+    });
+  }
+
+  function showQuestionNow(text) {
+    questionCard.classList.remove("fade-out");
+    questionCard.classList.add("fade-in");
+    questionText.textContent = text;
+  }
+
+  function showCurrentQuestion() {
+    const q = currentQuestion();
+    if (!q) return;
+    const label = `Q${state.idx + 1}: ${q.text}`;
+    logAssistant(label);
+    return swapQuestion(label).then(() => setProgress());
+  }
+
+  function showRevisitQuestion(text) {
+    const label = `🔁 ${text}`;
+    logAssistant(label);
+    return swapQuestion(label);
+  }
+
+  function showToast() {
+    welcomeToast.classList.remove("hidden");
+    welcomeToast.classList.add("show");
+    setTimeout(() => {
+      welcomeToast.classList.remove("show");
+      setTimeout(() => welcomeToast.classList.add("hidden"), 2000);
+    }, 2600);
   }
 
   function escapeMermaid(s) {
@@ -172,16 +188,15 @@
     URL.revokeObjectURL(url);
   }
 
-  // ---------- Phase de reprise (revisit) ----------
-
+  // ---- Phase de reprise (inchangée fonctionnellement) ----
   function startRevisitPhase() {
     if (!state.unsatisfied.length) {
-      return finalizeSummary(); // rien à reprendre
+      return finalizeSummary();
     }
     state.phase = "revisit";
     state.revisitQueue = state.unsatisfied.map(x => x.id);
     saveState();
-    appendMsg("assistant", "🔁 Reprenons rapidement les questions restées sans réponse satisfaisante.");
+    // Pas d'historique affiché, juste la prochaine question reformulée
     askNextRevisit();
   }
 
@@ -191,9 +206,8 @@
       return finalizeSummary();
     }
     const qid = state.revisitQueue[0];
-    const q = getQuestionById(qid);
+    const q = state.questions.find(x => x.id === qid);
     const meta = state.unsatisfied.find(x => x.id === qid) || {};
-    // Reformulation par l'agent
     try {
       const last_answers = meta.last_answers || [];
       const missing_points = meta.missing_points || [];
@@ -205,17 +219,15 @@
       const reformulated = ref.reformulated_question || q.text;
       state.currentRevisit = { id: qid, text: reformulated };
       saveState();
-      appendMsg("assistant", `🔁 ${reformulated}`);
-    } catch (e) {
-      // En cas d'échec, poser la question originale
+      await showRevisitQuestion(reformulated);
+    } catch {
       state.currentRevisit = { id: qid, text: q.text };
       saveState();
-      appendMsg("assistant", `🔁 ${q.text}`);
+      await showRevisitQuestion(q.text);
     }
   }
 
   function completeCurrentRevisit() {
-    // Retire l'élément en tête de queue et passe au suivant
     state.revisitQueue.shift();
     state.currentRevisit = null;
     saveState();
@@ -223,116 +235,98 @@
   }
 
   async function finalizeSummary() {
-    // Synthèse finale après la reprise
     try {
       const sum = await window.Agent.summarize({ history: state.history });
       state.summary = sum; saveState();
       fillSummaryCards(sum);
       await renderMindmap(sum);
-      appendMsg("assistant", "Synthèse et mindmap générées ✅");
+      // Afficher la section synthèse, masquer la question
+      questionStage.classList.add("hidden");
+      summaryStage.classList.remove("hidden");
     } catch (e) {
-      showError(e);
+      alert(e.message || e);
     } finally {
       setComposerEnabled(true);
     }
   }
 
-  // ---------- Handlers ----------
-
+  // ---- Handlers ----
   async function onSend() {
     const text = input.value.trim();
     if (!text) return;
     input.value = "";
-    appendMsg("user", text);
+    logUser(text);
     setComposerEnabled(false);
 
     try {
       if (state.phase === "revisit" && state.currentRevisit) {
-        // En reprise, on pose UNE question reformulée et on juge sans follow-up
         const qText = state.currentRevisit.text;
         const res = await window.Agent.decideNext({
-          history: state.history,
-          question: qText,
-          answer: text,
-          hint_followup: "",              // pas de hint en phase finale
-          followup_already_asked: true    // empêche les follow-ups
+          history: state.history, question: qText, answer: text,
+          hint_followup: "", followup_already_asked: true
         });
-        // On n'insiste pas : qu'elle soit answered true/false, on avance
-        if (res?.answered === true) {
-          appendMsg("assistant", "Merci, c’est clair. ✅");
-        } else {
-          appendMsg("assistant", "Merci, je note ta réponse. ✔️");
-        }
-        return completeCurrentRevisit();
+        // Avance sans s'attarder
+        logAssistant(res?.answered === true ? "Merci, c’est clair. ✅" : "Merci, je note ta réponse. ✔️");
+        return await completeCurrentRevisit();
       }
 
-      // --- Phase principale ---
+      // Phase principale
       const q = currentQuestion();
       const decision = await window.Agent.decideNext({
-        history: state.history,
-        question: q.text,
-        answer: text,
-        hint_followup: q.hint,
-        followup_already_asked: state.followupAsked
+        history: state.history, question: q.text, answer: text,
+        hint_followup: q.hint, followup_already_asked: state.followupAsked
       });
 
       const qid = q.id;
       const attempts = state.attempts[qid] || 0;
 
       if (decision.answered === true) {
-        // Réponse satisfaisante → passer à la suivante
         state.attempts[qid] = 0;
         state.followupAsked = false;
         saveState();
         state.idx = Math.min(state.idx + 1, state.questions.length);
         if (state.idx < state.questions.length) {
-          showCurrentQuestion();
+          await showCurrentQuestion();
         } else {
-          await onFinish(); // fin du premier tour
+          await onFinish();
         }
       } else {
-        // Réponse insuffisante
         const nextAttempts = attempts + 1;
         state.attempts[qid] = nextAttempts;
 
-        // Stocker un snapshot utile pour la reprise
+        // stock pour reprise
         const lastUserAnswers = state.history.filter(t => t.role === "user").slice(-2).map(t => t.content);
         const missing = decision.missing_points || [];
         const existingIdx = state.unsatisfied.findIndex(x => x.id === qid);
         if (existingIdx === -1) {
           state.unsatisfied.push({ id: qid, questionText: q.text, last_answers: lastUserAnswers, missing_points: missing });
         } else {
-          // mise à jour
-          const entry = state.unsatisfied[existingIdx];
-          entry.last_answers = lastUserAnswers;
-          entry.missing_points = missing;
+          state.unsatisfied[existingIdx].last_answers = lastUserAnswers;
+          state.unsatisfied[existingIdx].missing_points = missing;
         }
 
         if (decision.next_action === "ask_followup" && !state.followupAsked && nextAttempts < 2) {
-          // 1ère tentative insuffisante → poser UNE follow-up
           state.followupAsked = true; saveState();
-          appendMsg("assistant", decision.followup_question || "Peux-tu préciser ?");
+          await swapQuestion(decision.followup_question || "Peux-tu préciser ?");
+          logAssistant(decision.followup_question || "Peux-tu préciser ?");
         } else {
-          // Déjà une follow-up OU 2ème tentative insuffisante → marquer insatisfait et avancer
           state.followupAsked = false; saveState();
           state.idx = Math.min(state.idx + 1, state.questions.length);
           if (state.idx < state.questions.length) {
-            appendMsg("assistant", "Merci, on passe à la question suivante.");
-            showCurrentQuestion();
+            await showCurrentQuestion();
           } else {
             await onFinish();
           }
         }
       }
     } catch (e) {
-      showError(e);
+      alert(e.message || e);
     } finally {
       setComposerEnabled(true);
     }
   }
 
   async function onSkip() {
-    // Passage manuel → reset follow-up & tentatives pour la question courante
     const q = currentQuestion();
     if (q) {
       state.attempts[q.id] = 0;
@@ -340,65 +334,56 @@
       saveState();
     }
     state.idx = Math.min(state.idx + 1, state.questions.length);
-    if (state.idx < state.questions.length) showCurrentQuestion();
-    else await onFinish();
+    if (state.idx < state.questions.length) {
+      await showCurrentQuestion();
+    } else {
+      await onFinish();
+    }
   }
 
   async function onFinish() {
     if (state.phase !== "main") {
-      // Si déjà en reprise, laisser finalizeSummary gérer
       if (state.phase === "revisit" && !state.revisitQueue.length) {
         return finalizeSummary();
       }
       return;
     }
-    // Fin du premier tour : basculer en reprise si nécessaire
     if (state.unsatisfied.length > 0) {
-      setComposerEnabled(true); // on garde l'input actif
       return startRevisitPhase();
     }
-    // Sinon synthèse directe
     return finalizeSummary();
   }
 
-  // --- API modal / settings ---
-
+  // ---- Modales / réglages ----
   function openApiModal() {
     apiKeyInput.value = sessionStorage.getItem("OPENAI_KEY") || "";
     apiBaseInput.value = sessionStorage.getItem("OPENAI_BASE") || "https://api.openai.com/v1";
     apiModelInput.value = sessionStorage.getItem("OPENAI_MODEL") || "gpt-4o-mini";
     apiModal.showModal();
   }
-
   function openSettings() {
     settingsApiBase.value = sessionStorage.getItem("OPENAI_BASE") || "https://api.openai.com/v1";
     settingsApiModel.value = sessionStorage.getItem("OPENAI_MODEL") || "gpt-4o-mini";
     settingsModal.showModal();
   }
 
-  document.getElementById("apiSaveBtn")?.addEventListener("click", () => {
+  apiSaveBtn.addEventListener("click", () => {
     const key = apiKeyInput.value.trim();
-
-    // ✅ Nouvelle validation "code" (ne mentionne plus sk- ni OpenAI)
-    if (!key) {
-      alert("Code requis.");
-      return;
-    }
-
-    // Valeurs techniques (restent cachées dans la modale)
+    if (!key) { alert("Code requis."); return; }
     const base = (apiBaseInput?.value?.trim()) || sessionStorage.getItem("OPENAI_BASE") || "https://api.openai.com/v1";
     const model = (apiModelInput?.value?.trim()) || sessionStorage.getItem("OPENAI_MODEL") || "gpt-4o-mini";
-
-    window.Agent.configure({ apiKey: key, baseUrl: base, model });
+    window.Agent.configure({ apiKey:key, baseUrl:base, model });
     if (rememberKey.checked) sessionStorage.setItem("OPENAI_KEY", key);
     sessionStorage.setItem("OPENAI_BASE", base);
     sessionStorage.setItem("OPENAI_MODEL", model);
+    // Toast de bienvenue
+    showToast();
   });
 
   settingsSaveBtn.addEventListener("click", () => {
     const base = settingsApiBase.value.trim();
     const model = settingsApiModel.value.trim();
-    window.Agent.configure({ baseUrl: base, model });
+    window.Agent.configure({ baseUrl:base, model });
     sessionStorage.setItem("OPENAI_BASE", base);
     sessionStorage.setItem("OPENAI_MODEL", model);
   });
@@ -413,43 +398,50 @@
 
   btnSettings.addEventListener("click", openSettings);
   btnSend.addEventListener("click", onSend);
-  input.addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); onSend(); } });
+  input.addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); onSend(); }});
   btnSkip.addEventListener("click", onSkip);
   btnFinish.addEventListener("click", onFinish);
-  btnExportSvg.addEventListener("click", exportSVG);
+  btnExportSvg?.addEventListener("click", () => {
+    const svg = document.querySelector("#mindmap svg");
+    if (!svg) return alert("Mindmap non disponible.");
+    const blob = new Blob([svg.outerHTML], { type: "image/svg+xml" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a"); a.href = url; a.download = "mindmap.svg"; a.click();
+    URL.revokeObjectURL(url);
+  });
 
-  // --- Bootstrap ---
+  // ---- Bootstrap ----
   loadState();
 
-  // Charger questions
+  // Charger questions (avec cache-busting)
   try {
-    const res = await fetch("./data/questions.json");
+    const qsVersion = (window.APP_VERSION || Date.now());
+    const res = await fetch(`./data/questions.json?v=${qsVersion}`);
     state.questions = await res.json();
   } catch {
     alert("Impossible de charger data/questions.json");
     return;
   }
 
-  // Clé ?
+  // Config clé
   const key = sessionStorage.getItem("OPENAI_KEY");
   const base = sessionStorage.getItem("OPENAI_BASE") || "https://api.openai.com/v1";
   const model = sessionStorage.getItem("OPENAI_MODEL") || "gpt-4o-mini";
-  if (key) window.Agent.configure({ apiKey: key, baseUrl: base, model });
+  if (key) window.Agent.configure({ apiKey:key, baseUrl:base, model });
+  if (!key && typeof apiModal?.showModal === "function") apiModal.showModal();
 
-  if (!key) {
-    // Demander la clé si absente
-    if (typeof apiModal?.showModal === "function") apiModal.showModal();
-  }
-
-  // Restaurer interface
-  if (state.history.length === 0) {
-    showCurrentQuestion();
-  } else {
-    for (const t of state.history) appendMsg(t.role, t.content);
-    setProgress();
-    if (state.phase === "revisit" && state.currentRevisit) {
-      appendMsg("assistant", `🔁 ${state.currentRevisit.text}`);
+  // Afficher la question actuelle
+  if (state.phase === "revisit" && state.currentRevisit) {
+    await showRevisitQuestion(state.currentRevisit.text);
+  } else if (state.questions.length) {
+    if (state.history.length === 0) {
+      showQuestionNow(`Q${state.idx + 1}: ${state.questions[state.idx].text}`);
+      logAssistant(`Q${state.idx + 1}: ${state.questions[state.idx].text}`);
+      setProgress();
+    } else {
+      // Si historique, montrer la question actuelle sans rejouer tout
+      showQuestionNow(state.history.filter(h => h.role==="assistant").slice(-1)[0]?.content || `Q${state.idx + 1}: ${state.questions[state.idx].text}`);
+      setProgress();
     }
-    if (state.summary) { fillSummaryCards(state.summary); renderMindmap(state.summary); }
   }
 })();

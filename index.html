@@ -1,70 +1,68 @@
-
 <!doctype html>
 <html lang="fr">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Orientation – PoC</title>
-  <link rel="stylesheet" href="./styles.css" />
+  <link rel="stylesheet" href="./styles.css?v=2025-09-10-03" />
   <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
 </head>
 <body>
-  <header class="topbar">
-    <div class="left">
-      <h1>🎒 Orientation – PoC</h1>
-      <span class="muted">Statique (GitHub Pages) – Agent dans le navigateur</span>
-    </div>
-    <div class="right">
-      <button id="btnSettings" class="ghost">⚙️</button>
-      <button id="btnReset" class="danger">Réinitialiser</button>
+  <header class="topbar minimal">
+    <div class="brand">🎒 Orientation – PoC</div>
+    <div class="actions">
+      <button id="btnSettings" class="ghost" title="Réglages">⚙️</button>
+      <button id="btnReset" class="ghost" title="Réinitialiser">↺</button>
     </div>
   </header>
 
-  <main class="container">
-    <section class="card">
-      <div class="panel">
-        <div class="progress" title="Progression des questions">
-          <div id="progressBar"></div>
-        </div>
-        <div id="chatlog" class="chatlog"></div>
+  <main id="app" class="stage-wrap">
+    <!-- Carte principale : une seule question -->
+    <section class="stage card" id="questionStage">
+      <div class="progress"><div id="progressBar"></div></div>
+
+      <div id="questionCard" class="question-card fade-in">
+        <div id="questionText" class="question"></div>
       </div>
+
       <div class="composer">
         <textarea id="input" placeholder="Écris ta réponse ici…"></textarea>
-        <button id="btnSend">Envoyer</button>
-        <button id="btnSkip" class="ghost">Passer</button>
-        <button id="btnFinish" class="danger">Terminer</button>
+        <div class="buttons">
+          <button id="btnSend" class="primary">Envoyer</button>
+          <button id="btnSkip" class="ghost">Passer</button>
+          <button id="btnFinish" class="danger">Terminer</button>
+        </div>
       </div>
     </section>
 
-    <aside class="card">
-      <div class="panel">
-        <h2>🧠 Synthèse & Mindmap</h2>
-        <div id="summaryCards" class="grid"></div>
-      </div>
+    <!-- Section synthèse (affichée à la fin) -->
+    <section class="stage card hidden" id="summaryStage">
+      <h2 class="section-title">🧠 Synthèse & Mindmap</h2>
+      <div id="summaryCards" class="grid"></div>
       <div class="mindmap-wrap">
         <div id="mindmap"></div>
       </div>
       <div class="mindmap-actions">
-        <button id="btnExportSvg">Exporter SVG</button>
+        <button id="btnExportSvg" class="ghost">Exporter SVG</button>
       </div>
-    </aside>
+    </section>
   </main>
+
+  <!-- Toast de bienvenue -->
+  <div id="welcomeToast" class="toast hidden">Bienvenue dans le module Oreientation</div>
 
   <!-- Modale Code d'accès (clé masquée) -->
   <dialog id="apiModal">
     <form method="dialog" class="modal">
       <h3>🔒 Code d’accès requis</h3>
-      <p class="muted">
-        Saisis le code fourni pour utiliser l’outil.
-        Il n’est pas enregistré dans le code du site.
-      </p>
+      <p class="muted">Saisis le code fourni pour utiliser l’outil. Il n’est pas enregistré dans le code du site.</p>
       <label>Code</label>
       <input type="password" id="apiKeyInput" placeholder="Entrer votre code" />
       <div class="row">
         <label><input type="checkbox" id="rememberKey" /> Mémoriser ce code dans cet onglet</label>
       </div>
 
-      <!-- Champs techniques cachés (conservent la compatibilité avec app.js) -->
+      <!-- Champs techniques cachés (compat JS) -->
       <div class="row" style="display:none">
         <label>Endpoint</label>
         <input type="text" id="apiBaseInput" value="https://api.openai.com/v1" />
@@ -80,7 +78,6 @@
       </menu>
     </form>
   </dialog>
-
 
   <!-- Modale Réglages -->
   <dialog id="settingsModal">
@@ -101,9 +98,8 @@
     </form>
   </dialog>
 
-  <script>mermaid.initialize({ startOnLoad: false, theme: 'dark' });</script>
-  <script src="./scripts/agent.js"></script>
-  <script src="./scripts/app.js"></script>
+  <script>mermaid.initialize({ startOnLoad: false, theme: 'neutral' }); window.APP_VERSION="2025-09-10-03";</script>
+  <script src="./scripts/agent.js?v=2025-09-10-03"></script>
+  <script src="./scripts/app.js?v=2025-09-10-03"></script>
 </body>
 </html>
-
