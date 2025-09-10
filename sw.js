@@ -2,15 +2,19 @@
 const VERSION = (new URL(location)).searchParams.get('v') || 'dev';
 const CACHE_NAME = 'orientation-' + VERSION;
 
-// Liste des ressources essentielles (mêmes URLs que dans index.html)
+// Liste des ressources essentielles (mêmes URLs que dans index.html/preview.html)
 const CORE_ASSETS = [
   './',
   './index.html',
+  './preview.html',
   './styles.css?v=' + VERSION,
   './scripts/agent.js?v=' + VERSION,
   './scripts/app.js?v=' + VERSION,
+  './scripts/preview.js?v=' + VERSION,
   './data/questions.json?v=' + VERSION,
-  './assets/renard_univia.png?v=' + VERSION
+  './data/mock_summary.json?v=' + VERSION,
+  './assets/renard_univia.png?v=' + VERSION,
+  './assets/globe.png?v=' + VERSION
 ];
 
 self.addEventListener('install', (event) => {
@@ -29,16 +33,14 @@ self.addEventListener('activate', (event) => {
 });
 
 // Stratégie :
-// - HTML -> réseau d’abord (pour récupérer vite une nouvelle index.html), fallback cache
-// - Assets versionnés (?v=...) -> cache d’abord (puis réseau pour maj silencieuse)
+// - HTML -> réseau d’abord, fallback cache
+// - Assets versionnés (?v=...) -> cache d’abord, refresh silencieux
 self.addEventListener('fetch', (event) => {
   const req = event.request;
   const url = new URL(req.url);
 
-  // On ne gère que même origine (GitHub Pages)
   if (url.origin !== location.origin) return;
 
-  // HTML (probablement index)
   if (req.headers.get('accept')?.includes('text/html')) {
     event.respondWith((async () => {
       try {
@@ -54,11 +56,9 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Assets (CSS/JS/JSON/PNG…)
   event.respondWith((async () => {
     const cached = await caches.match(req);
     if (cached) {
-      // en parallèle, rafraîchir
       fetch(req).then(resp => caches.open(CACHE_NAME).then(c => c.put(req, resp.clone()))).catch(()=>{});
       return cached;
     }

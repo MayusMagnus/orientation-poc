@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Cache-Control" content="no-store, max-age=0, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Orientation — Aperçu mindmap</title>
+
+  <!-- Utilise la même version globale si tu veux : sinon cette page peut vivre seule -->
+  <script>window.APP_VERSION = window.APP_VERSION || "2025-09-10-10";</script>
+
+  <link rel="stylesheet" href="./styles.css?v=2025-09-10-10" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <script>mermaid.initialize({ startOnLoad: false, theme: 'neutral' });</script>
+</head>
+<body>
+  <header class="topbar minimal">
+    <div class="brand">
+      <span class="brand-title">🎒 Orientation – Aperçu mindmap</span>
+      <a href="./index.html" class="ghost small" title="Retour">← Retour</a>
+    </div>
+    <div class="actions">
+      <img src="./assets/renard_univia.png?v=2025-09-10-10" alt="Univia" class="logo">
+    </div>
+  </header>
+
+  <main class="stage-wrap">
+    <section class="stage card" style="padding:14px 16px 18px">
+      <div class="grid" style="grid-template-columns:1fr; gap:12px; padding:0">
+        <div class="card panel">
+          <div class="muted" style="margin-bottom:8px">Résumé JSON (colle ton objet conforme au schéma)</div>
+          <textarea id="jsonInput" style="width:100%; min-height:180px; border:1px solid var(--border); border-radius:10px; padding:10px;"></textarea>
+          <div style="display:flex; gap:8px; justify-content:flex-end; margin-top:10px">
+            <button id="btnLoadMock" class="ghost">Charger l’exemple</button>
+            <button id="btnRender" class="primary">Afficher ➜</button>
+          </div>
+        </div>
+
+        <div class="card panel">
+          <div class="muted" style="margin-bottom:8px">Aperçu mindmap</div>
+          <div id="mindmap" style="overflow:auto"></div>
+          <div style="display:flex; gap:8px; justify-content:flex-end; margin-top:10px">
+            <button id="btnExportSvg" class="ghost">Exporter SVG</button>
+          </div>
+        </div>
+
+        <div class="card panel">
+          <details>
+            <summary>Schéma attendu (rappel)</summary>
+            <pre style="white-space:pre-wrap; margin-top:8px">
+{
+  "objectifs": ["..."],
+  "priorites": ["..."],
+  "format_ideal": "...",
+  "langue": "...",
+  "niveau_actuel": "...",
+  "niveau_cible": "...",
+  "ambition_progression": "...",
+  "projet_phrase_ultra_positive": "...",
+  "meta": {
+    "pays_cibles": ["..."],
+    "depaysement_pref": "...",
+    "duree_pref": "...",
+    "bourse_interet": "...",
+    "inquietudes_top": ["..."]
+  },
+  "confidence": 0.0
+}
+            </pre>
+          </details>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script src="./scripts/preview.js?v=2025-09-10-10"></script>
+</body>
+</html>

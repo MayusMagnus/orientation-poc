@@ -1,6 +1,7 @@
 // scripts/app.js
 //
 // UI épurée : écran de bienvenue puis transition en fondu vers la 1re question.
+// Ajout : remplacement du nœud central "Mon projet" par une image (assets/globe.png) avec sizing auto.
 
 (async function () {
   // ---- DOM ----
@@ -48,12 +49,14 @@
   };
 
   // ---- Helpers ----
+  const STORAGE_KEY = 'orientation_state_' + (window.APP_VERSION || 'dev');
+
   function saveState() {
-    sessionStorage.setItem("orientation_state", JSON.stringify(state));
+    sessionStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   }
   function loadState() {
     try {
-      const raw = sessionStorage.getItem("orientation_state");
+      const raw = sessionStorage.getItem(STORAGE_KEY);
       if (raw) Object.assign(state, JSON.parse(raw));
     } catch {}
   }
@@ -139,6 +142,83 @@
     return String(s).replace(/[{}<>]/g, m => ({'{':'\\u007B','}':'\\u007D','<':'\\u003C','>':'\\u003E'}[m]));
   }
 
+  // === Post-traitement SVG : remplacer le root "Mon projet" par une image ===
+  function replaceRootWithImage(containerEl, imageHref) {
+    try {
+      const svg = containerEl.querySelector('svg');
+      if (!svg) return;
+
+      // Trouve le groupe contenant le texte "Mon projet"
+      const texts = Array.from(svg.querySelectorAll('text'));
+      const rootText = texts.find(t => (t.textContent || '').trim().toLowerCase().includes('mon projet'));
+      if (!rootText) return;
+
+      const rootGroup = rootText.closest('g') || svg;
+      // Cherche le cercle/ellipse associé au root
+      const circle = rootGroup.querySelector('circle, ellipse');
+      if (!circle) return;
+
+      // Récup coords/tailles
+      const isEllipse = circle.tagName.toLowerCase() === 'ellipse';
+      let cx, cy, r, rx, ry;
+      if (isEllipse) {
+        cx = parseFloat(circle.getAttribute('cx') || '0');
+        cy = parseFloat(circle.getAttribute('cy') || '0');
+        rx = parseFloat(circle.getAttribute('rx') || '0');
+        ry = parseFloat(circle.getAttribute('ry') || '0');
+      } else {
+        cx = parseFloat(circle.getAttribute('cx') || '0');
+        cy = parseFloat(circle.getAttribute('cy') || '0');
+        r  = parseFloat(circle.getAttribute('r')  || '0');
+        rx = r; ry = r;
+      }
+      const size = Math.max(10, Math.min(rx, ry) * 2 * 0.96); // 96% du diamètre (petit padding)
+      const x = cx - size / 2;
+      const y = cy - size / 2;
+
+      // Masque le texte
+      rootText.style.display = 'none';
+      // Enlève le remplissage du cercle, garde un léger contour
+      circle.setAttribute('fill', 'none');
+      circle.setAttribute('stroke', circle.getAttribute('stroke') || '#d1d5db');
+      circle.setAttribute('stroke-width', circle.getAttribute('stroke-width') || '1.2');
+
+      // Ajoute un clipPath circulaire pour garder une forme ronde
+      const defs = svg.querySelector('defs') || svg.insertBefore(document.createElementNS('http://www.w3.org/2000/svg', 'defs'), svg.firstChild);
+      const clipId = 'rootClip-' + Math.random().toString(36).slice(2);
+      const clip = document.createElementNS('http://www.w3.org/2000/svg', 'clipPath');
+      clip.setAttribute('id', clipId);
+
+      // Clone un cercle pour le clip (toujours cercle même si ellipse : on prend min(rx,ry))
+      const clipCircle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      clipCircle.setAttribute('cx', String(cx));
+      clipCircle.setAttribute('cy', String(cy));
+      clipCircle.setAttribute('r',  String(Math.min(rx, ry)));
+      clip.appendChild(clipCircle);
+      defs.appendChild(clip);
+
+      // Ajoute l'image
+      const img = document.createElementNS('http://www.w3.org/2000/svg', 'image');
+      img.setAttributeNS('http://www.w3.org/1999/xlink', 'href', imageHref);
+      img.setAttribute('x', String(x));
+      img.setAttribute('y', String(y));
+      img.setAttribute('width',  String(size));
+      img.setAttribute('height', String(size));
+      img.setAttribute('preserveAspectRatio', 'xMidYMid slice');
+      img.setAttribute('clip-path', `url(#${clipId})`);
+
+      // Place l'image juste après le cercle dans le rootGroup (pour que le contour reste visible au-dessus)
+      if (circle.nextSibling) {
+        rootGroup.insertBefore(img, circle.nextSibling);
+      } else {
+        rootGroup.appendChild(img);
+      }
+    } catch (e) {
+      // silencieux pour PoC
+      console.warn('replaceRootWithImage error', e);
+    }
+  }
+
   async function renderMindmap(summary) {
     const mm = [
       "mindmap",
@@ -162,6 +242,10 @@
     const el = document.getElementById("mindmap");
     const { svg } = await mermaid.render("mindmap-svg", mm);
     el.innerHTML = svg;
+
+    // ⬇️ Remplace le root par le globe
+    const imgUrl = `./assets/globe.png?v=${window.APP_VERSION || Date.now()}`;
+    replaceRootWithImage(el, imgUrl);
   }
 
   function fillSummaryCards(summary) {
@@ -392,7 +476,7 @@
   });
 
   btnReset.addEventListener("click", () => {
-    sessionStorage.removeItem("orientation_state");
+    sessionStorage.removeItem(STORAGE_KEY);
     sessionStorage.removeItem("OPENAI_KEY");
     sessionStorage.removeItem("OPENAI_BASE");
     sessionStorage.removeItem("OPENAI_MODEL");
