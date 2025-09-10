@@ -2,6 +2,7 @@
 //
 // UI + mindmap (root image). Anti-duplication stricte des sous-questions.
 // Paramétrage par question : max_followups, skip_revisit.
+// + LOGS : trace tous les événements (timestamps ISO, durées, décisions) et export JSON.
 
 (async function () {
   // ---- DOM ----
@@ -14,6 +15,7 @@
   const btnSkip = document.getElementById("btnSkip");
   const btnFinish = document.getElementById("btnFinish");
   const btnExportSvg = document.getElementById("btnExportSvg");
+  const btnExportLog = document.getElementById("btnExportLog"); // NEW
   const btnReset = document.getElementById("btnReset");
   const btnSettings = document.getElementById("btnSettings"); // peut être null
 
@@ -41,12 +43,16 @@
     history: [],
     summary: null,
     attempts: {},              // nb de follow-ups posés par question (key = qid)
-    followups: {},             // follow-ups (et question de base) déjà posés par question (key = qid) => string[]
+    followups: {},             // follow-ups (et question de base) posés par question (key = qid) => string[]
     unsatisfied: [],
     phase: "main",
     revisitQueue: [],
     currentRevisit: null,
-    threadStart: 0             // index history au début de la question courante
+    threadStart: 0,            // index history au début de la question courante
+    timers: {
+      questionStartMs: null,   // Date.now() à l’affichage de la question
+    },
+    logs: []                   // NEW: événements
   };
 
   // Storage versionné (évite conflit si ordre/questions ont changé)
@@ -55,6 +61,13 @@
   // ---- Helpers stockage ----
   function saveState() { sessionStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
   function loadState() { try { const raw = sessionStorage.getItem(STORAGE_KEY); if (raw) Object.assign(state, JSON.parse(raw)); } catch {} }
+
+  // ---- Helpers dates/log ----
+  const nowISO = () => new Date().toISOString();
+  function logEvent(ev) {
+    state.logs.push({ ts: nowISO(), ...ev });
+    saveState();
+  }
 
   // ---- Politique par question : cap & reprise ----
   function getPolicyForQuestion(q) {
@@ -149,6 +162,7 @@
     // 1) Si doublon → demander rephrase
     if (isDuplicate(proposed, prev, last, 0.78)) {
       try {
+        const apiStart = performance.now();
         const alt = await window.Agent.rephraseFollowup({
           base_followup: proposed,
           previous_followups: prev,
@@ -156,6 +170,8 @@
           last_answers: getLastAnswersSinceThreadStart(),
           last_assistant: last
         });
+        const apiMs = Math.round(performance.now() - apiStart);
+        logEvent({ event: "api_rephrase_followup", qid, api_ms: apiMs });
         if (alt?.question && !isDuplicate(alt.question, prev, last, 0.78)) {
           return alt.question;
         }
@@ -172,16 +188,30 @@
   }
 
   async function showCurrentQuestion() {
+    const q = currentQuestion(); const qid = q.id;
     const label = questionLabel();
     logAssistant(label);
     await swapQuestion(label);
+
     // démarrer un "thread" pour cette question
     state.threadStart = state.history.length;
-    const q = currentQuestion(); const qid = q.id;
     if (!state.followups[qid]) state.followups[qid] = [];
-    // mémoriser aussi la question de base (sans le préfixe Qn:)
+    // mémoriser la question de base (sans le préfixe Qn:)
     if (!state.followups[qid].includes(q.text)) state.followups[qid].push(q.text);
+
+    // timer question
+    state.timers.questionStartMs = Date.now();
+
     setProgress();
+
+    // LOG
+    logEvent({
+      event: "question_shown",
+      qid,
+      qindex: state.idx,
+      text: q.text,
+      policy: getPolicyForQuestion(q)
+    });
   }
 
   async function transitionWelcomeToQuestion() {
@@ -198,15 +228,27 @@
     questionStage.classList.add("fade-in");
     setTimeout(() => questionStage.classList.remove("fade-in"), 400);
 
+    const q = currentQuestion(); const qid = q.id;
     const label = questionLabel();
     logAssistant(label);
     showQuestionNow(label);
 
     state.threadStart = state.history.length;
-    const q = currentQuestion(); const qid = q.id;
     if (!state.followups[qid]) state.followups[qid] = [];
     if (!state.followups[qid].includes(q.text)) state.followups[qid].push(q.text);
+
+    state.timers.questionStartMs = Date.now();
+
     setProgress();
+
+    // LOG
+    logEvent({
+      event: "question_shown",
+      qid,
+      qindex: state.idx,
+      text: q.text,
+      policy: getPolicyForQuestion(q)
+    });
   }
 
   function escapeMermaid(s) {
@@ -306,6 +348,9 @@
       })
       .map(x => x.id);
     saveState();
+
+    logEvent({ event: "revisit_start", count: state.revisitQueue.length });
+
     askNextRevisit();
   }
 
@@ -317,34 +362,65 @@
     try {
       const last_answers = meta.last_answers || [];
       const missing_points = meta.missing_points || [];
+      const apiStart = performance.now();
       const ref = await window.Agent.reformulate({ original_question: q.text, last_answers, missing_points });
+      const apiMs = Math.round(performance.now() - apiStart);
       const reformulated = ref.reformulated_question || q.text;
       state.currentRevisit = { id: qid, text: reformulated }; saveState();
       await swapQuestion(`🔁 ${reformulated}`); logAssistant(`🔁 ${reformulated}`);
+
+      logEvent({ event: "revisit_question_shown", qid, text: reformulated, api_ms: apiMs });
     } catch {
       state.currentRevisit = { id: qid, text: q.text }; saveState();
       await swapQuestion(`🔁 ${q.text}`); logAssistant(`🔁 ${q.text}`);
+      logEvent({ event: "revisit_question_shown", qid, text: q.text, api_ms: null });
     }
   }
 
   function completeCurrentRevisit() {
-    state.revisitQueue.shift();
+    const doneId = state.revisitQueue.shift();
     state.currentRevisit = null;
     saveState();
+    logEvent({ event: "revisit_question_done", qid: doneId });
     return askNextRevisit();
   }
 
   async function finalizeSummary() {
     try {
+      const apiStart = performance.now();
       const sum = await window.Agent.summarize({ history: state.history });
+      const apiMs = Math.round(performance.now() - apiStart);
+
       state.summary = sum; saveState();
       fillSummaryCards(sum);
       await renderMindmap(sum);
       questionStage.classList.add("hidden");
       welcomeStage.classList.add("hidden");
       summaryStage.classList.remove("hidden");
+
+      logEvent({ event: "summary_generated", api_ms: apiMs, objectives_count: (sum.objectifs||[]).length });
     } catch (e) { alert(e.message || e); }
     finally { setComposerEnabled(true); }
+  }
+
+  // ---- Export log ----
+  function exportLog() {
+    const payload = {
+      app_version: window.APP_VERSION || "dev",
+      exported_at: nowISO(),
+      questions_meta: state.questions.map(q => ({
+        id: q.id, text: q.text,
+        max_followups: q.max_followups ?? 5,
+        skip_revisit: Boolean(q.skip_revisit)
+      })),
+      logs: state.logs
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = `orientation-log-${stamp}.json`; a.click();
+    URL.revokeObjectURL(url);
   }
 
   // ---- Handlers ----
@@ -352,12 +428,22 @@
     const text = input.value.trim();
     if (!text) return;
     input.value = "";
+
+    const q = (state.phase === "revisit" && state.currentRevisit)
+      ? { id: state.currentRevisit.id, text: state.currentRevisit.text }
+      : currentQuestion();
+
+    // LOG réponse élève (+ temps de réponse à partir de l’affichage de la question)
+    const responseMs = state.timers.questionStartMs ? (Date.now() - state.timers.questionStartMs) : null;
+    logEvent({ event: "user_answer", qid: q?.id, qindex: state.idx, answer: text, response_ms: responseMs });
+
     logUser(text);
     setComposerEnabled(false);
 
     try {
       if (state.phase === "revisit" && state.currentRevisit) {
         const qText = state.currentRevisit.text;
+        const apiStart = performance.now();
         const res = await window.Agent.decideNext({
           history: state.history, question: qText, answer: text,
           hint_followup: "", followup_count: 0,
@@ -365,16 +451,21 @@
           last_assistant: lastAssistant(),
           max_followups: 5, skip_revisit: false
         });
+        const apiMs = Math.round(performance.now() - apiStart);
+
+        logEvent({ event: "agent_decision", phase: "revisit", qid: state.currentRevisit.id, answered: res.answered, action: res.next_action, api_ms: apiMs, missing_points: res.missing_points });
+
         logAssistant(res?.answered === true ? "Merci, c’est clair. ✅" : "Merci, je note ta réponse. ✔️");
         return await completeCurrentRevisit();
       }
 
       // Phase principale
-      const q = currentQuestion(); const qid = q.id;
+      const qid = q.id;
       const attempts = state.attempts[qid] || 0;
       const previous_followups = state.followups[qid] || [];
       const policy = getPolicyForQuestion(q);
 
+      const apiStart = performance.now();
       const decision = await window.Agent.decideNext({
         history: state.history,
         question: q.text,
@@ -387,9 +478,25 @@
         max_followups: policy.max_followups,
         skip_revisit: policy.skip_revisit
       });
+      const apiMs = Math.round(performance.now() - apiStart);
+
+      logEvent({
+        event: "agent_decision",
+        phase: "main",
+        qid,
+        attempts,
+        answered: decision.answered,
+        action: decision.next_action,
+        api_ms: apiMs,
+        missing_points: decision.missing_points
+      });
 
       if (decision.answered === true) {
         state.attempts[qid] = 0; saveState();
+
+        // passage à la question suivante
+        logEvent({ event: "next_question", from_qid: qid });
+
         state.idx = Math.min(state.idx + 1, state.questions.length);
         if (state.idx < state.questions.length) await showCurrentQuestion(); else await onFinish();
       } else {
@@ -410,25 +517,45 @@
           let fup = await ensureNonDuplicateFollowup(decision.followup_question || "", q.text, qid);
           // mémoriser et afficher
           state.followups[qid] = [...previous_followups, fup]; saveState();
+
+          // LOG follow-up
+          logEvent({ event: "followup_asked", qid, attempt: nextAttempts, text: fup });
+
           await swapQuestion(fup); logAssistant(fup);
+
+          // Redémarrer le timer de réponse pour cette sous-question
+          state.timers.questionStartMs = Date.now();
         } else {
+          // cap atteint ou modèle propose de passer
           state.attempts[qid] = 0; saveState();
+          logEvent({ event: "advance_due_to_cap_or_model", qid, attempts: nextAttempts, cap: policy.max_followups });
+
           state.idx = Math.min(state.idx + 1, state.questions.length);
           if (state.idx < state.questions.length) await showCurrentQuestion(); else await onFinish();
         }
       }
-    } catch (e) { alert(e.message || e); }
-    finally { setComposerEnabled(true); }
+    } catch (e) {
+      alert(e.message || e);
+      logEvent({ event: "error_onSend", message: String(e) });
+    } finally {
+      setComposerEnabled(true);
+    }
   }
 
   async function onSkip() {
     const q = currentQuestion();
-    if (q) { state.attempts[q.id] = 0; saveState(); }
+    if (q) {
+      logEvent({ event: "skip_question", qid: q.id, text: q.text });
+      state.attempts[q.id] = 0;
+      saveState();
+    }
     state.idx = Math.min(state.idx + 1, state.questions.length);
     if (state.idx < state.questions.length) await showCurrentQuestion(); else await onFinish();
   }
 
   async function onFinish() {
+    logEvent({ event: "finish_clicked" });
+
     if (state.phase !== "main") {
       if (state.phase === "revisit" && !state.revisitQueue.length) return finalizeSummary();
       return;
@@ -459,19 +586,25 @@
     if (rememberKey.checked) sessionStorage.setItem("OPENAI_KEY", key);
     sessionStorage.setItem("OPENAI_BASE", base);
     sessionStorage.setItem("OPENAI_MODEL", model);
+
+    logEvent({ event: "session_started", model, base_url: base });
+
     await transitionWelcomeToQuestion();
   });
 
   settingsSaveBtn.addEventListener("click", () => {
     const base = settingsApiBase.value.trim();
-    theModel = settingsApiModel.value.trim();
+    const theModel = settingsApiModel.value.trim();
     const model = theModel || "gpt-4o-mini";
     window.Agent.configure({ baseUrl:base, model });
     sessionStorage.setItem("OPENAI_BASE", base);
     sessionStorage.setItem("OPENAI_MODEL", model);
+
+    logEvent({ event: "settings_changed", model, base_url: base });
   });
 
   btnReset.addEventListener("click", () => {
+    logEvent({ event: "reset_clicked" });
     sessionStorage.removeItem(STORAGE_KEY);
     sessionStorage.removeItem("OPENAI_KEY");
     sessionStorage.removeItem("OPENAI_BASE");
@@ -492,6 +625,7 @@
     const a = document.createElement("a"); a.href = url; a.download = "mindmap.svg"; a.click();
     URL.revokeObjectURL(url);
   });
+  btnExportLog?.addEventListener("click", exportLog); // NEW
 
   // ---- Bootstrap ----
   loadState();
@@ -517,9 +651,16 @@
   if (state.history.length > 0 || key) {
     welcomeStage.classList.add("hidden");
     questionStage.classList.remove("hidden");
-    if (state.summary) { questionStage.classList.add("hidden"); summaryStage.classList.remove("hidden"); }
-    else if (state.phase === "revisit" && state.currentRevisit) { questionText.textContent = `🔁 ${state.currentRevisit.text}`; }
-    else { const lastA = state.history.filter(h => h.role==="assistant").slice(-1)[0]?.content; questionText.textContent = lastA || questionLabel(); setProgress(); }
+    if (state.summary) {
+      questionStage.classList.add("hidden");
+      summaryStage.classList.remove("hidden");
+    } else if (state.phase === "revisit" && state.currentRevisit) {
+      questionText.textContent = `🔁 ${state.currentRevisit.text}`;
+    } else {
+      const lastA = state.history.filter(h => h.role==="assistant").slice(-1)[0]?.content;
+      questionText.textContent = lastA || questionLabel();
+      setProgress();
+    }
   } else {
     if (typeof apiModal?.showModal === "function") apiModal.showModal();
   }
