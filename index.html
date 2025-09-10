@@ -2,10 +2,21 @@
 <html lang="fr">
 <head>
   <meta charset="utf-8" />
+  <meta http-equiv="Cache-Control" content="no-store, max-age=0, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Orientation – PoC</title>
-  <link rel="stylesheet" href="./styles.css?v=2025-09-10-03" />
+
+  <!-- Version globale à incrémenter à chaque déploiement -->
+  <script>window.APP_VERSION="2025-09-10-06";</script>
+
+  <!-- Styles avec cache-busting -->
+  <link rel="stylesheet" href="./styles.css?v=2025-09-10-06" />
+
+  <!-- Mermaid (mindmap) -->
   <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <script>mermaid.initialize({ startOnLoad: false, theme: 'neutral' });</script>
 </head>
 <body>
   <header class="topbar minimal">
@@ -55,7 +66,10 @@
   <dialog id="apiModal">
     <form method="dialog" class="modal">
       <h3>🔒 Code d’accès requis</h3>
-      <p class="muted">Saisis le code fourni pour utiliser l’outil. Il n’est pas enregistré dans le code du site.</p>
+      <p class="muted">
+        Saisis le code fourni pour utiliser l’outil.
+        Il n’est pas enregistré dans le code du site.
+      </p>
       <label>Code</label>
       <input type="password" id="apiKeyInput" placeholder="Entrer votre code" />
       <div class="row">
@@ -98,8 +112,26 @@
     </form>
   </dialog>
 
-  <script>mermaid.initialize({ startOnLoad: false, theme: 'neutral' }); window.APP_VERSION="2025-09-10-03";</script>
-  <script src="./scripts/agent.js?v=2025-09-10-03"></script>
-  <script src="./scripts/app.js?v=2025-09-10-03"></script>
+  <!-- Scripts versionnés -->
+  <script src="./scripts/agent.js?v=2025-09-10-06"></script>
+  <script src="./scripts/app.js?v=2025-09-10-06"></script>
+
+  <!-- Service Worker : recharge automatiquement quand une nouvelle version est dispo -->
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('./sw.js?v=' + (window.APP_VERSION || Date.now()))
+          .then(() => {
+            let refreshing = false;
+            navigator.serviceWorker.addEventListener('controllerchange', () => {
+              if (refreshing) return;
+              refreshing = true;
+              location.reload(); // recharge quand le nouveau SW prend le contrôle
+            });
+          })
+          .catch(() => {/* silencieux pour un PoC */});
+      });
+    }
+  </script>
 </body>
 </html>
