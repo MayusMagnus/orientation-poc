@@ -1,11 +1,10 @@
 // scripts/agent.js
 //
 // Agent côté front : appels OpenAI et logique.
-// - decideNext : prompt personnalisé conservé (cap 4 par question)
-// - summarize : idem
-// - extractFicheUpdate : patch fiche à chaque réponse
-// - recap : priorise la fiche
-// - NEW auditFicheAndSuggestNext : en fin d’entretien, complète la fiche depuis la conversation et propose au plus 1 question complémentaire (le front limitera à 3 au total)
+// - decideNext : prompt mis à jour (cap 4, pas de reprise)
+// - summarize : idem (pour encadrés)
+// - extractFicheUpdate : produit un "patch" à fusionner dans la fiche élève
+// - recap : prend en compte la fiche comme source prioritaire
 
 (function () {
   const Agent = {};
@@ -42,14 +41,14 @@
   const J = (x) => JSON.stringify(x);
   const safeParseJSON = (s) => { try { return JSON.parse(s); } catch { return null; } };
 
-  // === Decision: ask follow-up vs next question (cap 4)
+  // === Decision: ask follow-up vs next question (PAS de reprise)
   Agent.decideNext = async ({
     history = [], question, answer,
     hint_followup = "", followup_count = 0,
     previous_followups = [], last_answers = [],
     last_assistant = "",
     max_followups = 4,
-    skip_revisit = false
+    skip_revisit = false // conservé pour compat, non utilisé
   }) => {
     const sys = [
       "Tu es un conseiller d’orientation exigeant et bienveillant. Tu t'adresses à un(e) lycéen(ne) français(e).",
@@ -58,9 +57,8 @@
       "• Réponses vagues ou « je ne sais pas » → pas satisfaisant: propose options, échelles (1-5), exemples.",
       "• NE JAMAIS répéter une sous-question déjà posée, ni reformuler exactement la question initiale, ni le DERNIER message de l’agent.",
       "• Pour éviter les répétitions, vérifie previous_followups et last_assistant et change d’angle.",
-      "• Max 4 follow-ups par question. Ensuite, passer.",
+      "• Max 4 follow-ups par question. Ensuite, passe à la question suivante. Ne mémorise pas pour une reprise ultérieure.",
       "• Respecte strictement la limite max de sous-questions transmise.",
-      "• Si 'skip_revisit' est vrai, privilégie le passage à la question suivante dès qu'une réponse minimale est donnée.",
       "Réponds UNIQUEMENT en JSON valide."
     ].join("\n");
 
@@ -70,7 +68,6 @@
       hint_followup,
       followup_count,
       max_followups,
-      skip_revisit,
       previous_followups,
       last_assistant,
       last_answers,
@@ -100,22 +97,7 @@
     return parsed;
   };
 
-  // === Reformulate (gardé pour d’autres usages si besoin)
-  Agent.reformulate = async ({ original_question, last_answers = [], missing_points = [] }) => {
-    const sys = "Reformule une question d’orientation de manière ultra-ciblée et concrète en français, sans intro.";
-    const user = {
-      original_question, last_answers, missing_points,
-      instruction: "Produit UNE seule question courte, précise, actionnable. Réponds en JSON {\"reformulated_question\":\"...\"}."
-    };
-    const out = await chat(
-      [{ role: "system", content: sys }, { role: "user", content: J(user) }],
-      { json: true, temperature: 0.3, max_tokens: 200 }
-    );
-    const parsed = safeParseJSON(out) || {};
-    return { reformulated_question: parsed.reformulated_question || original_question };
-  };
-
-  // === Rephrase follow-up (anti-duplication)
+  // === Rephrase a follow-up to avoid duplication
   Agent.rephraseFollowup = async ({ base_followup, previous_followups = [], question, last_answers = [], last_assistant = "" }) => {
     const sys = "Tu proposes une variante de sous-question, courte, concrète, différente des formulations précédentes et du dernier message de l’agent. Pas d’intro.";
     const user = {
@@ -134,7 +116,7 @@
     return { question: parsed.question || base_followup };
   };
 
-  // === Synthèse structurée pour encadrés
+  // === Summarize (structuré pour encadrés)
   Agent.summarize = async ({ history = [] }) => {
     const sys = [
       "Tu analyses le dialogue pour produire une synthèse structurée et concise.",
@@ -154,7 +136,7 @@
     return parsed;
   };
 
-  // === Patch fiche à chaque réponse
+  // === NEW: extraction/patch de fiche élève à chaque réponse
   Agent.extractFicheUpdate = async ({ qid, question, answer, fiche }) => {
     const sys = [
       "Tu es un extracteur strict qui met à jour une fiche élève JSON selon une question/réponse.",
@@ -166,21 +148,21 @@
     ].join("\n");
 
     const mapping = {
-      q1: "Remplir: raison_depart, priorite_globale (academique|professionnel|personnel|je_ne_sais_pas), exemple_priorite.",
+      q1: "Remplir: raison_depart (string), priorite_globale (academique|professionnel|personnel|je_ne_sais_pas), exemple_priorite (string).",
       q2: "Remplir: priorites_apprentissages[] (Top 3 triés par rang; axe in [langue,culture,autonomie,métier]; pourquoi_prioritaire pour rang=1).",
-      q3: "Remplir: destinations_souhaitees[] (label, raison, attracteurs[]), criteres_environnement[], reve_absolu si explicite.",
-      q4: "Remplir: langues_cibles[] (par langue visée, niveaux CECR, taches_ok/difficiles), mini_tests_langue[] si mini-situation.",
-      q5: "Remplir: preference_culturelle.proximite (proche|depaysement), justification, fibre_aventure (1-5), attaches_familiales (1-5).",
-      q6: "Remplir: type_sejour (etudes|stage|volontariat|job|sejour_linguistique|cesure), duree_preferee_semaines, contexte_ideal, flexibilites[].",
+      q3: "Remplir: destinations_souhaitees[] (label, raison, attracteurs[]), criteres_environnement[] (liste courte), reve_absolu si expression explicite d'un rêve.",
+      q4: "Remplir: langues_cibles[] (une entrée par langue souhaitée, niveaux CECR, taches_ok/difficiles), mini_tests_langue[] si tu poses/évalues une mini-situation.",
+      q5: "Remplir: preference_culturelle.proximite (proche|depaysement), justification (string), fibre_aventure (1-5), attaches_familiales (1-5).",
+      q6: "Remplir: type_sejour (etudes|stage|volontariat|job|sejour_linguistique|cesure), duree_preferee_semaines (number), contexte_ideal (string), flexibilites[].",
       q7: "Remplir: bourse.interet (oui|non|incertain), bourse.programmes_connus[] si cités, bourse.objectif_financement (partiel|total|indetermine).",
       q8: "Remplir: inquietudes[] (categorie, priorite 1|2, details, pistes_mitigation[]).",
       q9: "Remplir: experiences_passees[] (lieu, quand, cadre, duree_semaines, aime, pas_aime, lecons), experiences_non_depart_raison si pertinent.",
-      q10:"Remplir: projet_phrase et projet_structure (lieu, duree_semaines, objectif)."
+      q10:"Remplir: projet_phrase (string) et projet_structure (lieu, duree_semaines, objectif)."
     };
 
     const user = {
       qid, question, answer,
-      fiche_excerpt: fiche,
+      fiche_excerpt: fiche, // état courant
       mapping_for_qid: mapping[qid] || "Ne rien remplir hors schéma."
     };
 
@@ -191,41 +173,6 @@
     const parsed = safeParseJSON(out) || {};
     if (!parsed.patch || typeof parsed.patch !== "object") parsed.patch = {};
     if (!Array.isArray(parsed.alerts)) parsed.alerts = [];
-    return parsed;
-  };
-
-  // === NEW: Audit post-entretien — complète fiche et propose au plus 1 question
-  Agent.auditFicheAndSuggestNext = async ({ history = [], fiche = {}, remaining_slots = 3 }) => {
-    const sys = [
-      "Tu es un auditeur de fiche élève. À partir de la conversation et de la fiche actuelle :",
-      "1) Complète ce qui peut l’être avec HAUTE confiance (sinon laisse vide).",
-      "2) Détermine si les infos sont SUFFISANTES pour générer une synthèse et un récap.",
-      "3) Si ce n’est pas suffisant ET s'il reste des slots, propose EXACTEMENT UNE question complémentaire, courte et ciblée.",
-      "Important : si remaining_slots = 0, ne propose PAS de question et considère que c’est suffisant.",
-      "Priorise les champs critiques pour l’orientation : priorite_globale, langues_cibles (au moins une avec niveau visé), type_sejour, duree_preferee_semaines OU projet_structure.duree_semaines, projet_structure.lieu et objectif, 1–2 priorites_apprentissages, au moins 1 destination ou critère d’environnement si pertinent."
-    ].join("\n");
-
-    const user = {
-      fiche_eleve: fiche,
-      history_excerpt: compactHistory(history, 80),
-      remaining_slots,
-      wanted_output: {
-        patch: "sous-objet à fusionner dans la fiche",
-        enough: "boolean",
-        next_question: "string|null (UNIQUEMENT si enough=false et remaining_slots>0)",
-        missing_fields: "string[] (clés les plus critiques encore vides)"
-      }
-    };
-
-    const out = await chat(
-      [{ role: "system", content: sys }, { role: "user", content: J(user) }],
-      { json: true, temperature: 0.2, max_tokens: 700 }
-    );
-    const parsed = safeParseJSON(out) || {};
-    if (!parsed.patch || typeof parsed.patch !== "object") parsed.patch = {};
-    parsed.enough = Boolean(parsed.enough);
-    if (remaining_slots <= 0) parsed.next_question = null;
-    if (!Array.isArray(parsed.missing_fields)) parsed.missing_fields = [];
     return parsed;
   };
 
