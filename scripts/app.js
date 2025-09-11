@@ -75,7 +75,7 @@
   // ---- Politique par question ----
   function getPolicyForQuestion(q) {
     return {
-      max_followups: Number(q?.max_followups ?? 5),
+      max_followups: Number(q?.max_followups ?? 4),
       skip_revisit: Boolean(q?.skip_revisit)
     };
   }
@@ -496,7 +496,7 @@
           hint_followup: "", followup_count: 0,
           previous_followups: [], last_answers: getLastAnswersSinceThreadStart(),
           last_assistant: lastAssistant(),
-          max_followups: 5, skip_revisit: false
+          max_followups: 4, skip_revisit: false
         });
         const apiMs = Math.round(performance.now() - apiStart);
 
