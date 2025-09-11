@@ -1,0 +1,35 @@
+{
+  "meta": {
+    "version": "1.0.0",
+    "created_at": "",
+    "updated_at": "",
+    "locale": "fr-FR"
+  },
+  "raison_depart": "",
+  "priorite_globale": "je_ne_sais_pas",
+  "exemple_priorite": "",
+  "priorites_apprentissages": [],
+  "destinations_souhaitees": [],
+  "reve_absolu": "",
+  "langues_cibles": [],
+  "mini_tests_langue": [],
+  "preference_culturelle": { "proximite": "proche", "justification": "" },
+  "fibre_aventure": 3,
+  "attaches_familiales": 3,
+  "type_sejour": "",
+  "duree_preferee_semaines": null,
+  "contexte_ideal": "",
+  "flexibilites": [],
+  "bourse": {
+    "interet": "incertain",
+    "programmes_connus": [],
+    "objectif_financement": "indetermine"
+  },
+  "inquietudes": [],
+  "experiences_passees": [],
+  "experiences_non_depart_raison": "",
+  "projet_phrase": "",
+  "projet_structure": { "lieu": "", "duree_semaines": null, "objectif": "" },
+  "criteres_environnement": [],
+  "coherences": { "alertes": [] }
+}

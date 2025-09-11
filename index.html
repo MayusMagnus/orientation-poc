@@ -9,9 +9,12 @@
   <title>Orientation</title>
 
   <!-- ⬆️ Incrémente à chaque déploiement -->
-  <script>window.APP_VERSION="2025-09-10-17";</script>
+  <script>window.APP_VERSION="2025-09-11-01";</script>
 
-  <link rel="stylesheet" href="./styles.css?v=2025-09-10-17" />
+  <link rel="stylesheet" href="./styles.css?v=2025-09-11-01" />
+  <!-- Export image/PDF du récap -->
+  <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 </head>
 <body>
   <header class="topbar minimal">
@@ -20,7 +23,7 @@
       <button id="btnReset" class="ghost small" title="Réinitialiser">↺</button>
     </div>
     <div class="actions">
-      <img src="./assets/renard_univia.png?v=2025-09-10-17" alt="Univia" class="logo">
+      <img src="./assets/renard_univia.png?v=2025-09-11-01" alt="Univia" class="logo">
     </div>
   </header>
 
@@ -56,12 +59,15 @@
       <!-- Encadrés (inchangé) -->
       <div id="summaryCards" class="grid"></div>
 
-      <!-- Nouveau : Récap narratif -->
+      <!-- Récap narratif -->
       <div id="recap" class="recap"></div>
 
-      <!-- Actions -->
+      <!-- Actions d’export -->
       <div class="mindmap-actions">
-        <button id="btnExportLog" class="ghost">Exporter le log</button>
+        <button id="btnExportFiche" class="ghost">Exporter la fiche (JSON)</button>
+        <button id="btnExportConvRecap" class="ghost">Exporter conversation + récap (JSON)</button>
+        <button id="btnExportRecapPng" class="ghost">Exporter le récap (PNG)</button>
+        <button id="btnExportRecapPdf" class="ghost">Exporter le récap (PDF)</button>
       </div>
     </section>
   </main>
@@ -89,8 +95,8 @@
     </form>
   </dialog>
 
-  <script src="./scripts/agent.js?v=2025-09-10-17"></script>
-  <script src="./scripts/app.js?v=2025-09-10-17"></script>
+  <script src="./scripts/agent.js?v=2025-09-11-01"></script>
+  <script src="./scripts/app.js?v=2025-09-11-01"></script>
 
   <script>
     // Service worker: force refresh après mise à jour

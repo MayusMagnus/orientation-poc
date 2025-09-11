@@ -1,9 +1,9 @@
 // scripts/app.js
 //
 // UI + encadrés + récap narratif (plus de mindmap).
-// Anti-duplication stricte des sous-questions.
-// Paramétrage par question : max_followups, skip_revisit.
-// + LOGS : trace tous les événements (timestamps ISO, durées, décisions) et export JSON.
+// FICHE ÉLÈVE: mise à jour continue à chaque réponse (patch LLM) + exports.
+// Anti-duplication stricte des sous-questions. max_followups/skip_revisit par question.
+// LOGS: événements + timings, exports JSON & PNG/PDF du récap.
 
 (async function () {
   // ---- DOM ----
@@ -15,7 +15,12 @@
   const btnSend = document.getElementById("btnSend");
   const btnSkip = document.getElementById("btnSkip");
   const btnFinish = document.getElementById("btnFinish");
-  const btnExportLog = document.getElementById("btnExportLog");
+
+  const btnExportFiche = document.getElementById("btnExportFiche");
+  const btnExportConvRecap = document.getElementById("btnExportConvRecap");
+  const btnExportRecapPng = document.getElementById("btnExportRecapPng");
+  const btnExportRecapPdf = document.getElementById("btnExportRecapPdf");
+
   const btnReset = document.getElementById("btnReset");
   const btnSettings = document.getElementById("btnSettings"); // peut être null
 
@@ -44,20 +49,19 @@
     history: [],
     summary: null,
     recap: null,
-    attempts: {},              // nb de follow-ups posés par question (key = qid)
-    followups: {},             // follow-ups (et question de base) posés par question (key = qid) => string[]
+    fiche: null,              // NEW: fiche élève (objet)
+    attempts: {},
+    followups: {},
     unsatisfied: [],
     phase: "main",
     revisitQueue: [],
     currentRevisit: null,
-    threadStart: 0,            // index history au début de la question courante
-    timers: {
-      questionStartMs: null,   // Date.now() à l’affichage de la question
-    },
-    logs: []                   // événements
+    threadStart: 0,
+    timers: { questionStartMs: null },
+    logs: []
   };
 
-  // Storage versionné (évite conflit si ordre/questions ont changé)
+  // Storage versionné
   const STORAGE_KEY = 'orientation_state_' + (window.APP_VERSION || 'dev');
 
   // ---- Helpers stockage ----
@@ -66,12 +70,9 @@
 
   // ---- Helpers dates/log ----
   const nowISO = () => new Date().toISOString();
-  function logEvent(ev) {
-    state.logs.push({ ts: nowISO(), ...ev });
-    saveState();
-  }
+  function logEvent(ev) { state.logs.push({ ts: nowISO(), ...ev }); saveState(); }
 
-  // ---- Politique par question : cap & reprise ----
+  // ---- Politique par question ----
   function getPolicyForQuestion(q) {
     return {
       max_followups: Number(q?.max_followups ?? 5),
@@ -79,7 +80,7 @@
     };
   }
 
-  // ---- Helpers logique ----
+  // ---- Helpers texte ----
   function setProgress() {
     const total = state.questions.length || 1;
     const pct = state.phase === "main" ? Math.min(100, Math.round((state.idx / total) * 100)) : 100;
@@ -87,9 +88,7 @@
   }
   function currentQuestion() { return state.questions[state.idx]; }
   function lastAssistant() {
-    for (let i = state.history.length - 1; i >= 0; i--) {
-      if (state.history[i].role === 'assistant') return state.history[i].content || "";
-    }
+    for (let i = state.history.length - 1; i >= 0; i--) if (state.history[i].role === 'assistant') return state.history[i].content || "";
     return "";
   }
   function logAssistant(text){ state.history.push({ role:"assistant", content:text }); saveState(); }
@@ -119,34 +118,25 @@
     return `Q${state.idx + 1}: ${q.text}`;
   }
 
-  // Normalisation texte pour comparer
+  // ---- Similarité (anti-duplication) ----
   function normalize(s) { return String(s||"").toLowerCase().replace(/[^\p{L}\p{N} ]/gu,' ').replace(/\s+/g,' ').trim(); }
   function jaccard(a, b) {
-    const A = new Set(normalize(a).split(' '));
-    const B = new Set(normalize(b).split(' '));
+    const A = new Set(normalize(a).split(' ')); const B = new Set(normalize(b).split(' '));
     if (!A.size && !B.size) return 1;
-    const inter = [...A].filter(x => B.has(x)).length;
-    const union = new Set([...A, ...B]).size;
+    const inter = [...A].filter(x => B.has(x)).length; const union = new Set([...A, ...B]).size;
     return union ? inter/union : 0;
   }
   function isDuplicate(candidate, prevList, lastMsg, thresh=0.8) {
     const nC = normalize(candidate);
-    if (lastMsg) {
-      const nL = normalize(lastMsg);
-      if (nL === nC || jaccard(nL, nC) > thresh) return true;
-    }
-    return (prevList || []).some(p => {
-      const np = normalize(p);
-      return np === nC || jaccard(np, nC) > thresh;
-    });
+    if (lastMsg) { const nL = normalize(lastMsg); if (nL === nC || jaccard(nL, nC) > thresh) return true; }
+    return (prevList || []).some(p => { const np = normalize(p); return np === nC || jaccard(np, nC) > thresh; });
   }
-
   function getLastAnswersSinceThreadStart(limit=3) {
     const start = state.threadStart || 0;
     return state.history.slice(start).filter(m => m.role === 'user').map(m => m.content).slice(-limit);
   }
 
-  // Gabarits de secours si le modèle persiste à répéter
+  // ---- Gabarits (fallback follow-up) ----
   function fallbackFollowups(baseQuestion) {
     const q = baseQuestion || "";
     return [
@@ -173,19 +163,35 @@
         });
         const apiMs = Math.round(performance.now() - apiStart);
         logEvent({ event: "api_rephrase_followup", qid, api_ms: apiMs });
-        if (alt?.question && !isDuplicate(alt.question, prev, last, 0.78)) {
-          return alt.question;
-        }
+        if (alt?.question && !isDuplicate(alt.question, prev, last, 0.78)) return alt.question;
       } catch {}
       const pool = fallbackFollowups(qText);
-      for (const cand of pool) {
-        if (!isDuplicate(cand, prev, last, 0.78)) return cand;
-      }
+      for (const cand of pool) if (!isDuplicate(cand, prev, last, 0.78)) return cand;
       return `Sois concret sur "${qText}": indique un lieu précis, une date cible et une durée estimée.`;
     }
     return proposed;
   }
 
+  // ---- FICHE ÉLÈVE: merge & timestamps ----
+  function deepMerge(target, patch) {
+    if (patch === null || patch === undefined) return target;
+    if (typeof patch !== 'object' || Array.isArray(patch)) return patch; // tableaux: remplacés
+    const out = { ...(target || {}) };
+    for (const k of Object.keys(patch)) {
+      out[k] = deepMerge(out[k], patch[k]);
+    }
+    return out;
+  }
+  function touchFicheCreated() {
+    if (!state.fiche?.meta) state.fiche = { meta: {} };
+    if (!state.fiche.meta.created_at) state.fiche.meta.created_at = nowISO();
+  }
+  function touchFicheUpdated() {
+    if (!state.fiche?.meta) state.fiche = { meta: {} };
+    state.fiche.meta.updated_at = nowISO();
+  }
+
+  // ---- UI helpers ----
   async function showCurrentQuestion() {
     const q = currentQuestion(); const qid = q.id;
     const label = questionLabel();
@@ -197,9 +203,7 @@
     if (!state.followups[qid].includes(q.text)) state.followups[qid].push(q.text);
 
     state.timers.questionStartMs = Date.now();
-
     setProgress();
-
     logEvent({ event: "question_shown", qid, qindex: state.idx, text: q.text, policy: getPolicyForQuestion(q) });
   }
 
@@ -227,14 +231,8 @@
     if (!state.followups[qid].includes(q.text)) state.followups[qid].push(q.text);
 
     state.timers.questionStartMs = Date.now();
-
     setProgress();
-
     logEvent({ event: "question_shown", qid, qindex: state.idx, text: q.text, policy: getPolicyForQuestion(q) });
-  }
-
-  function escapeHtml(s) {
-    return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
   }
 
   function fillSummaryCards(summary) {
@@ -264,29 +262,18 @@
 
   function renderRecap(recap) {
     recapEl.innerHTML = "";
-
     const sections = [
       { key: "self_learning", title: "🌱 Connaissance de soi et apprentissage" },
       { key: "academic",      title: "🎓 Ambitions académiques" },
       { key: "environment",   title: "🌍 Cadre de vie et environnement" },
       { key: "social",        title: "🤝 Relations sociales et ouverture" }
     ];
-
     for (const s of sections) {
       const block = document.createElement("div");
       block.className = "card panel";
-
-      const h3 = document.createElement("h3");
-      h3.className = "recap-title";
-      h3.textContent = s.title;
-
-      const p = document.createElement("p");
-      p.className = "recap-text";
-      p.textContent = (recap && recap[s.key]) ? recap[s.key] : "";
-
-      block.appendChild(h3);
-      block.appendChild(p);
-      recapEl.appendChild(block);
+      const h3 = document.createElement("h3"); h3.className = "recap-title"; h3.textContent = s.title;
+      const p = document.createElement("p");  p.className = "recap-text";   p.textContent = (recap && recap[s.key]) ? recap[s.key] : "";
+      block.appendChild(h3); block.appendChild(p); recapEl.appendChild(block);
     }
   }
 
@@ -301,9 +288,7 @@
       })
       .map(x => x.id);
     saveState();
-
     logEvent({ event: "revisit_start", count: state.revisitQueue.length });
-
     askNextRevisit();
   }
 
@@ -321,7 +306,6 @@
       const reformulated = ref.reformulated_question || q.text;
       state.currentRevisit = { id: qid, text: reformulated }; saveState();
       await swapQuestion(`🔁 ${reformulated}`); logAssistant(`🔁 ${reformulated}`);
-
       logEvent({ event: "revisit_question_shown", qid, text: reformulated, api_ms: apiMs });
     } catch {
       state.currentRevisit = { id: qid, text: q.text }; saveState();
@@ -338,19 +322,18 @@
     return askNextRevisit();
   }
 
+  // ---- FINALISATION: encadrés + récap (avec fiche prioritaire) ----
   async function finalizeSummary() {
     try {
       const sumStart = performance.now();
       const sum = await window.Agent.summarize({ history: state.history });
       const sumMs = Math.round(performance.now() - sumStart);
-
       state.summary = sum; saveState();
       fillSummaryCards(sum);
 
       const recapStart = performance.now();
-      const recap = await window.Agent.recap({ history: state.history, summary: state.summary });
+      const recap = await window.Agent.recap({ history: state.history, summary: state.summary, fiche: state.fiche });
       const recapMs = Math.round(performance.now() - recapStart);
-
       state.recap = recap; saveState();
       renderRecap(recap);
 
@@ -372,24 +355,80 @@
     }
   }
 
-  // ---- Export log ----
-  function exportLog() {
+  // ---- EXPORTS ----
+  function exportFicheJson() {
+    const payload = state.fiche || {};
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a"); a.href = url; a.download = `fiche-eleve-${stamp}.json`; a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function exportConversationRecapJson() {
     const payload = {
       app_version: window.APP_VERSION || "dev",
       exported_at: nowISO(),
-      questions_meta: state.questions.map(q => ({
-        id: q.id, text: q.text,
-        max_followups: q.max_followups ?? 5,
-        skip_revisit: Boolean(q.skip_revisit)
-      })),
-      logs: state.logs
+      history: state.history,
+      recap: state.recap
     };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
     const stamp = new Date().toISOString().replace(/[:.]/g, "-");
     const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url; a.download = `orientation-log-${stamp}.json`; a.click();
+    const a = document.createElement("a"); a.href = url; a.download = `conversation-recap-${stamp}.json`; a.click();
     URL.revokeObjectURL(url);
+  }
+
+  async function exportRecapPng() {
+    const el = recapEl;
+    if (!el) return alert("Récap introuvable.");
+    const canvas = await html2canvas(el, { scale: 2, backgroundColor: null, useCORS: true });
+    canvas.toBlob((blob) => {
+      if (!blob) return;
+      const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a"); a.href = url; a.download = `recap-${stamp}.png`; a.click();
+      URL.revokeObjectURL(url);
+    });
+  }
+
+  async function exportRecapPdf() {
+    const el = recapEl;
+    if (!el) return alert("Récap introuvable.");
+    const canvas = await html2canvas(el, { scale: 2, backgroundColor: "#ffffff" });
+    const imgData = canvas.toDataURL("image/png");
+    const { jsPDF } = window.jspdf;
+    const pdf = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" });
+    const pageWidth = pdf.internal.pageSize.getWidth();
+    const pageHeight = pdf.internal.pageSize.getHeight();
+    const imgWidth = pageWidth - 48; // marges
+    const imgHeight = (canvas.height * imgWidth) / canvas.width;
+
+    let y = 24;
+    if (imgHeight < pageHeight - 48) {
+      pdf.addImage(imgData, "PNG", 24, y, imgWidth, imgHeight, undefined, "FAST");
+    } else {
+      // découpage multi-pages si nécessaire
+      let remainHeight = imgHeight;
+      const pageCanvas = document.createElement("canvas");
+      const ctx = pageCanvas.getContext("2d");
+      const a4ratio = imgWidth / (pageHeight - 48);
+      pageCanvas.width = canvas.width;
+      pageCanvas.height = Math.floor((pageCanvas.width / imgWidth) * (pageHeight - 48));
+
+      let sY = 0;
+      while (remainHeight > 0) {
+        ctx.clearRect(0,0,pageCanvas.width,pageCanvas.height);
+        ctx.drawImage(canvas, 0, sY, canvas.width, pageCanvas.height, 0, 0, pageCanvas.width, pageCanvas.height);
+        const img = pageCanvas.toDataURL("image/png");
+        pdf.addImage(img, "PNG", 24, 24, imgWidth, pageHeight - 48, undefined, "FAST");
+        remainHeight -= (pageHeight - 48);
+        sY += pageCanvas.height;
+        if (remainHeight > 0) pdf.addPage();
+      }
+    }
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    pdf.save(`recap-${stamp}.pdf`);
   }
 
   // ---- Handlers ----
@@ -398,7 +437,8 @@
     if (!text) return;
     input.value = "";
 
-    const q = (state.phase === "revisit" && state.currentRevisit)
+    const inRevisit = (state.phase === "revisit" && state.currentRevisit);
+    const q = inRevisit
       ? { id: state.currentRevisit.id, text: state.currentRevisit.text }
       : currentQuestion();
 
@@ -408,8 +448,47 @@
     logUser(text);
     setComposerEnabled(false);
 
+    // --- NEW: mise à jour de la fiche à chaque réponse ---
     try {
-      if (state.phase === "revisit" && state.currentRevisit) {
+      if (q?.id) {
+        touchFicheCreated();
+        const apiStart = performance.now();
+        const res = await window.Agent.extractFicheUpdate({
+          qid: q.id,
+          question: q.text,
+          answer: text,
+          fiche: state.fiche
+        });
+        const apiMs = Math.round(performance.now() - apiStart);
+
+        // merge patch
+        const before = state.fiche;
+        state.fiche = deepMerge(state.fiche || {}, res.patch || {});
+        touchFicheUpdated(); saveState();
+
+        logEvent({
+          event: "fiche_updated",
+          qid: q.id,
+          api_ms: apiMs,
+          patch_keys: Object.keys(res.patch || {}),
+          alerts: res.alerts || []
+        });
+
+        // optionnel: enregistrer les alertes dans la fiche
+        if (Array.isArray(res.alerts) && res.alerts.length) {
+          const alerts = (state.fiche?.coherences?.alertes) || [];
+          const updated = { ...(state.fiche || {}) };
+          updated.coherences = updated.coherences || {};
+          updated.coherences.alertes = [...alerts, ...res.alerts];
+          state.fiche = updated; saveState();
+        }
+      }
+    } catch (e) {
+      logEvent({ event: "fiche_update_error", qid: q?.id, message: String(e) });
+    }
+
+    try {
+      if (inRevisit) {
         const qText = state.currentRevisit.text;
         const apiStart = performance.now();
         const res = await window.Agent.decideNext({
@@ -461,16 +540,14 @@
 
       if (decision.answered === true) {
         state.attempts[qid] = 0; saveState();
-
         logEvent({ event: "next_question", from_qid: qid });
-
         state.idx = Math.min(state.idx + 1, state.questions.length);
         if (state.idx < state.questions.length) await showCurrentQuestion(); else await onFinish();
       } else {
         const nextAttempts = attempts + 1;
         state.attempts[qid] = nextAttempts; saveState();
 
-        // Mémoriser points manquants pour la reprise (si autorisée)
+        // Unsatisfied (si autorisée à reprise)
         const lastUserAnswers = state.history.filter(t => t.role === "user").slice(-2).map(t => t.content);
         const missing = decision.missing_points || [];
         const existingIdx = state.unsatisfied.findIndex(x => x.id === qid);
@@ -482,16 +559,12 @@
         if (decision.next_action === "ask_followup" && nextAttempts < policy.max_followups) {
           let fup = await ensureNonDuplicateFollowup(decision.followup_question || "", q.text, qid);
           state.followups[qid] = [...previous_followups, fup]; saveState();
-
           logEvent({ event: "followup_asked", qid, attempt: nextAttempts, text: fup });
-
           await swapQuestion(fup); logAssistant(fup);
-
           state.timers.questionStartMs = Date.now();
         } else {
           state.attempts[qid] = 0; saveState();
           logEvent({ event: "advance_due_to_cap_or_model", qid, attempts: nextAttempts, cap: policy.max_followups });
-
           state.idx = Math.min(state.idx + 1, state.questions.length);
           if (state.idx < state.questions.length) await showCurrentQuestion(); else await onFinish();
         }
@@ -508,8 +581,7 @@
     const q = currentQuestion();
     if (q) {
       logEvent({ event: "skip_question", qid: q.id, text: q.text });
-      state.attempts[q.id] = 0;
-      saveState();
+      state.attempts[q.id] = 0; saveState();
     }
     state.idx = Math.min(state.idx + 1, state.questions.length);
     if (state.idx < state.questions.length) await showCurrentQuestion(); else await onFinish();
@@ -517,7 +589,6 @@
 
   async function onFinish() {
     logEvent({ event: "finish_clicked" });
-
     if (state.phase !== "main") {
       if (state.phase === "revisit" && !state.revisitQueue.length) return finalizeSummary();
       return;
@@ -548,9 +619,7 @@
     if (rememberKey.checked) sessionStorage.setItem("OPENAI_KEY", key);
     sessionStorage.setItem("OPENAI_BASE", base);
     sessionStorage.setItem("OPENAI_MODEL", model);
-
     logEvent({ event: "session_started", model, base_url: base });
-
     await transitionWelcomeToQuestion();
   });
 
@@ -561,7 +630,6 @@
     window.Agent.configure({ baseUrl:base, model });
     sessionStorage.setItem("OPENAI_BASE", base);
     sessionStorage.setItem("OPENAI_MODEL", model);
-
     logEvent({ event: "settings_changed", model, base_url: base });
   });
 
@@ -579,7 +647,11 @@
   input.addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); onSend(); }});
   btnSkip.addEventListener("click", onSkip);
   btnFinish.addEventListener("click", onFinish);
-  btnExportLog?.addEventListener("click", exportLog);
+
+  btnExportFiche?.addEventListener("click", exportFicheJson);
+  btnExportConvRecap?.addEventListener("click", exportConversationRecapJson);
+  btnExportRecapPng?.addEventListener("click", exportRecapPng);
+  btnExportRecapPdf?.addEventListener("click", exportRecapPdf);
 
   // ---- Bootstrap ----
   loadState();
@@ -590,7 +662,17 @@
     state.questions = await res.json();
   } catch { alert("Impossible de charger data/questions.json"); return; }
 
-  // Nettoie les entrées "insatisfaites" pour les questions exclues de la reprise (sessions existantes)
+  // Charger la fiche vide si absente
+  try {
+    if (!state.fiche) {
+      const v = (window.APP_VERSION || Date.now());
+      const res = await fetch(`./data/fiche_eleve.empty.json?v=${v}`);
+      state.fiche = await res.json();
+      touchFicheCreated(); touchFicheUpdated(); saveState();
+    }
+  } catch { alert("Impossible de charger data/fiche_eleve.empty.json"); return; }
+
+  // Nettoyer unsatisfied pour skip_revisit
   state.unsatisfied = (state.unsatisfied || []).filter(item => {
     const q = state.questions.find(x => x.id === item.id);
     return q && !Boolean(q.skip_revisit);

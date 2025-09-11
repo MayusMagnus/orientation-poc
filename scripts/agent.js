@@ -1,8 +1,10 @@
 // scripts/agent.js
 //
-// Agent côté front : appels OpenAI et logique de décision.
-// - conserve ton prompt "exigeant & bienveillant" pour decideNext (avec exceptions bourse)
-// - ajoute Agent.recap() pour générer le récap narratif (4 sections)
+// Agent côté front : appels OpenAI et logique.
+// - decideNext : ton prompt personnalisé conservé
+// - summarize : idem
+// - NEW extractFicheUpdate : produit un "patch" à fusionner dans la fiche élève
+// - recap : prend en compte la fiche comme source prioritaire
 
 (function () {
   const Agent = {};
@@ -131,7 +133,7 @@
     return { question: parsed.question || base_followup };
   };
 
-  // === Summarize (déjà utilisé par l'app) — laissé en place
+  // === Summarize (structuré pour encadrés)
   Agent.summarize = async ({ history = [] }) => {
     const sys = [
       "Tu analyses le dialogue pour produire une synthèse structurée et concise.",
@@ -145,16 +147,54 @@
       { json: true, temperature: 0.3, max_tokens: 700 }
     );
     const parsed = safeParseJSON(out) || {};
-    // normalisation minimale
     parsed.objectifs = Array.isArray(parsed.objectifs) ? parsed.objectifs : [];
     parsed.priorites = Array.isArray(parsed.priorites) ? parsed.priorites : [];
     parsed.meta = typeof parsed.meta === "object" && parsed.meta !== null ? parsed.meta : {};
     return parsed;
   };
 
-  // === Recap (nouveau) — 4 paragraphes narratifs
-  Agent.recap = async ({ history = [], summary = {} }) => {
-    // Paragraphes défaut (si l’API échoue ou JSON invalide)
+  // === NEW: extraction/patch de fiche élève à chaque réponse
+  Agent.extractFicheUpdate = async ({ qid, question, answer, fiche }) => {
+    const sys = [
+      "Tu es un extracteur strict qui met à jour une fiche élève JSON selon une question/réponse.",
+      "Ne déduis pas au-delà du raisonnable. Si l’info n’est pas explicite, laisse vide ou 'inconnu'.",
+      "Les niveaux de langue sont CECR: A1,A2,B1,B2,C1,C2 ou 'inconnu'.",
+      "Pour les langues cibles, N'INCLUS QUE les langues que l'élève souhaite pratiquer/améliorer.",
+      "Réponds UNIQUEMENT en JSON avec: {\"patch\":{...}, \"alerts\": string[] }.",
+      "Le 'patch' doit être un sous-ensemble valide du schéma de la fiche (mêmes clés/structures)."
+    ].join("\n");
+
+    const mapping = {
+      q1: "Remplir: raison_depart (string), priorite_globale (academique|professionnel|personnel|je_ne_sais_pas), exemple_priorite (string).",
+      q2: "Remplir: priorites_apprentissages[] (Top 3 triés par rang; axe in [langue,culture,autonomie,métier]; pourquoi_prioritaire pour rang=1).",
+      q3: "Remplir: destinations_souhaitees[] (label, raison, attracteurs[]), criteres_environnement[] (liste courte), reve_absolu si expression explicite d'un rêve.",
+      q4: "Remplir: langues_cibles[] (une entrée par langue souhaitée, niveaux CECR, taches_ok/difficiles), mini_tests_langue[] si tu poses/évalues une mini-situation.",
+      q5: "Remplir: preference_culturelle.proximite (proche|depaysement), justification (string), fibre_aventure (1-5), attaches_familiales (1-5).",
+      q6: "Remplir: type_sejour (etudes|stage|volontariat|job|sejour_linguistique|cesure), duree_preferee_semaines (number), contexte_ideal (string), flexibilites[].",
+      q7: "Remplir: bourse.interet (oui|non|incertain), bourse.programmes_connus[] si cités, bourse.objectif_financement (partiel|total|indetermine).",
+      q8: "Remplir: inquietudes[] (categorie, priorite 1|2, details, pistes_mitigation[]).",
+      q9: "Remplir: experiences_passees[] (lieu, quand, cadre, duree_semaines, aime, pas_aime, lecons), experiences_non_depart_raison si pertinent.",
+      q10:"Remplir: projet_phrase (string) et projet_structure (lieu, duree_semaines, objectif)."
+    };
+
+    const user = {
+      qid, question, answer,
+      fiche_excerpt: fiche, // le modèle voit l’état courant
+      mapping_for_qid: mapping[qid] || "Ne rien remplir hors schéma."
+    };
+
+    const out = await chat(
+      [{ role: "system", content: sys }, { role: "user", content: J(user) }],
+      { json: true, temperature: 0.2, max_tokens: 600 }
+    );
+    const parsed = safeParseJSON(out) || {};
+    if (!parsed.patch || typeof parsed.patch !== "object") parsed.patch = {};
+    if (!Array.isArray(parsed.alerts)) parsed.alerts = [];
+    return parsed;
+  };
+
+  // === Recap (priorise la fiche)
+  Agent.recap = async ({ history = [], summary = {}, fiche = {} }) => {
     const defaults = {
       self_learning:
         "Si tu te reconnais dans ces questions, c’est que tu es curieux(se), que tu aimes explorer de nouvelles expériences et apprendre en participant activement. Tu auras sans doute besoin d’un environnement où l’on valorise l’échange, la discussion et l’initiative. Si ce n’est pas vraiment ton cas, tu pourrais préférer des contextes plus structurés, avec des repères clairs et un cadre rassurant. Cela ne t’empêche pas de réussir à l’étranger, mais il sera important que tu puisses avancer à ton rythme et trouver du soutien autour de toi.",
@@ -167,15 +207,14 @@
     };
 
     const sys = [
-      "Rédige un récapitulatif narratif en français à destination d’un(e) lycéen(ne) français(e).",
-      "Garde un ton bienveillant, concret et nuancé (jamais paternaliste).",
-      "Produit 4 paragraphes (~120–180 mots chacun), sous forme de JSON STRICT avec les clés:",
-      "self_learning, academic, environment, social.",
-      "N’utilise pas les labels de clé dans le texte; rends uniquement le JSON.",
-      "Adapte le contenu aux signaux présents dans la synthèse (objectifs, priorités, format, langue, inquiétudes, etc.) et dans l’historique."
+      "Rédige un récapitulatif narratif en français (4 paragraphes) pour un(e) lycéen(ne).",
+      "PRIORISE les informations de la 'fiche_eleve' quand elles contredisent la conversation ou la synthèse.",
+      "Pour les langues, considère 'langues_cibles' de la fiche comme source de vérité sur les langues visées.",
+      "Réponds UNIQUEMENT en JSON strict avec les clés: self_learning, academic, environment, social."
     ].join("\n");
 
     const user = {
+      fiche_eleve: fiche,
       summary,
       history_excerpt: compactHistory(history, 40),
       mapping_titles: {
@@ -187,8 +226,7 @@
       style_constraints: {
         approx_word_count_each: "120-180",
         tone: "bienveillant, clair, nuancé",
-        audience: "lycéen(ne) français(e)",
-        avoid: ["répétitions", "jargon", "promesses excessives"]
+        audience: "lycéen(ne) français(e)"
       }
     };
 
