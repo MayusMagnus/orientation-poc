@@ -1,74 +1,68 @@
-// sw.js — cache contrôlé par version
-const VERSION = (new URL(location)).searchParams.get('v') || 'dev';
-const CACHE_NAME = 'orientation-' + VERSION;
+// sw.js — ne JAMAIS mettre en cache data/*.json
+const VERSION = "2025-09-11-04";
+const STATIC_CACHE = "static-" + VERSION;
 
-// Liste des ressources essentielles (mêmes URLs que dans index.html/preview.html)
-const CORE_ASSETS = [
-  './',
-  './index.html',
-  './preview.html',
-  './styles.css?v=' + VERSION,
-  './scripts/agent.js?v=' + VERSION,
-  './scripts/app.js?v=' + VERSION,
-  './scripts/preview.js?v=' + VERSION,
-  './data/questions.json?v=' + VERSION,
-  './data/mock_summary.json?v=' + VERSION,
-  './assets/renard_univia.png?v=' + VERSION,
-  './assets/globe.png?v=' + VERSION
-];
-
-self.addEventListener('install', (event) => {
+self.addEventListener("install", (event) => {
   self.skipWaiting();
   event.waitUntil(
-    caches.open(CACHE_NAME).then(cache => cache.addAll(CORE_ASSETS))
+    caches.open(STATIC_CACHE).then((cache) =>
+      cache.addAll([
+        "./",
+        "./index.html?v=" + VERSION,
+        "./styles.css?v=" + VERSION,
+        "./scripts/app.js?v=" + VERSION,
+        "./scripts/agent.js?v=" + VERSION,
+        "./assets/renard_univia.png?v=" + VERSION,
+      ]).catch(() => {})
+    )
   );
 });
 
-self.addEventListener('activate', (event) => {
-  event.waitUntil((async () => {
-    const keys = await caches.keys();
-    await Promise.all(keys.map(k => { if (k !== CACHE_NAME) return caches.delete(k); }));
-    await self.clients.claim();
-  })());
+self.addEventListener("activate", (event) => {
+  event.waitUntil(
+    caches.keys().then((keys) =>
+      Promise.all(
+        keys.filter((k) => k !== STATIC_CACHE).map((k) => caches.delete(k))
+      )
+    ).then(() => self.clients.claim())
+  );
 });
 
-// Stratégie :
-// - HTML -> réseau d’abord, fallback cache
-// - Assets versionnés (?v=...) -> cache d’abord, refresh silencieux
-self.addEventListener('fetch', (event) => {
+self.addEventListener("fetch", (event) => {
   const req = event.request;
   const url = new URL(req.url);
 
-  if (url.origin !== location.origin) return;
-
-  if (req.headers.get('accept')?.includes('text/html')) {
-    event.respondWith((async () => {
-      try {
-        const fresh = await fetch(req, { cache: 'no-store' });
-        const cache = await caches.open(CACHE_NAME);
-        cache.put(req, fresh.clone());
-        return fresh;
-      } catch (e) {
-        const cached = await caches.match(req);
-        return cached || new Response('<h1>Offline</h1>', { status: 503, headers: { 'Content-Type': 'text/html' } });
-      }
-    })());
+  // 1) data/*.json : réseau d'abord, pas de cache
+  if (url.pathname.includes("/data/") && url.pathname.endsWith(".json")) {
+    event.respondWith(
+      fetch(req, { cache: "no-store" }).catch(() =>
+        caches.match(req, { ignoreSearch: false })
+      )
+    );
     return;
   }
 
-  event.respondWith((async () => {
-    const cached = await caches.match(req);
-    if (cached) {
-      fetch(req).then(resp => caches.open(CACHE_NAME).then(c => c.put(req, resp.clone()))).catch(()=>{});
-      return cached;
-    }
-    try {
-      const fresh = await fetch(req);
-      const cache = await caches.open(CACHE_NAME);
-      cache.put(req, fresh.clone());
-      return fresh;
-    } catch (e) {
-      return new Response('', { status: 504 });
-    }
-  })());
+  // 2) le reste : cache d'abord, puis réseau, en respectant la query string
+  if (req.method === "GET") {
+    event.respondWith(
+      caches.match(req, { ignoreSearch: false }).then((cached) => {
+        const fetchPromise = fetch(req)
+          .then((networkRes) => {
+            if (
+              networkRes &&
+              networkRes.status === 200 &&
+              networkRes.type === "basic"
+            ) {
+              const clone = networkRes.clone();
+              caches.open(STATIC_CACHE).then((cache) =>
+                cache.put(req, clone)
+              );
+            }
+            return networkRes;
+          })
+          .catch(() => cached);
+        return cached || fetchPromise;
+      })
+    );
+  }
 });

@@ -581,7 +581,7 @@
 
   try {
     const qsVersion = (window.APP_VERSION || Date.now());
-    const res = await fetch(`./data/questions.json?v=${qsVersion}`);
+    const res = await fetch(`./data/questions.json?v=${qsVersion}`, { cache: 'no-store' });
     state.questions = await res.json();
   } catch { alert("Impossible de charger data/questions.json"); return; }
 
@@ -589,7 +589,7 @@
   try {
     if (!state.fiche) {
       const v = (window.APP_VERSION || Date.now());
-      const res = await fetch(`./data/fiche_eleve.empty.json?v=${v}`);
+      const res = await fetch(`./data/fiche_eleve.empty.json?v=${v}`, { cache: 'no-store' });
       state.fiche = await res.json();
       // init meta
       if (!state.fiche.meta) state.fiche.meta = {};

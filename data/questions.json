@@ -48,6 +48,6 @@
   {
     "id": "q10",
     "text": "Décris ton projet en une phrase : où, combien de temps, pour quoi faire.",
-    "hint": "Aider à rendre la phrase plus spécifique (lieu+durée+objet)."
+    "hint": "Ne pose de nouvelle question que s'il manque le lieu, la durée ou l'objet."
   }
 ]
