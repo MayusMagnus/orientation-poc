@@ -316,7 +316,7 @@
   async function finalizeSummary() {
     try {
       const sumStart = performance.now();
-      const sum = await window.Agent.summarize({ history: state.history });
+      const sum = await window.Agent.summarize({ history: state.history, fiche: state.fiche });
       const sumMs = Math.round(performance.now() - sumStart);
       state.summary = sum; saveState();
       fillSummaryCards(sum);

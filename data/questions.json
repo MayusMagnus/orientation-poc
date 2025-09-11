@@ -17,7 +17,7 @@
   {
     "id": "q4",
     "text": "Quelle langue veux-tu pratiquer ou améliorer ? Quel est ton niveau actuel ? Ton niveau visé ?",
-    "hint": "Mini-situation immersive (ex: demander son chemin, discuter en soirée). Teste le niveau du lycéen en lui posant une question dans la langue cible, au niveau actuel. Si c'est trop dur pour lui, tu peux encore reposer 1 seule question plus simple, ensuite tu passes à la question suivante."
+    "hint": "1 seule ou 2 questions supplémentaires : Teste le niveau du lycéen en lui posant une question dans la langue cible (pour cette question, tu parleras en anglais à quelqu'un qui voudrais étudier l'anglais par exemple), au niveau actuel dans mini-situation immersive (ex: demander son chemin, discuter en soirée), si possible en rapport avec ce qu'il veut faire. Si l'étudiant a mal répondu, pose une question plus simple, ensuite tu passes à la question suivante."
   },
   {
     "id": "q5",
@@ -27,7 +27,7 @@
   {
     "id": "q6",
     "text": "Quelle durée de séjour te convient le mieux ?",
-    "hint": "Préciser durée (semaines/mois) et contexte idéal (études, stage, volontariat, job, séjour linguistique, césure, campus, entreprise, ONG…)."
+    "hint": "Préciser durée (semaines/mois) et contexte idéal (études, stage, volontariat, job, séjour linguistique, césure, campus, entreprise, ONG…). La durée ne peut pas être inférieure à 6 mois."
   },
   {
     "id": "q7",
