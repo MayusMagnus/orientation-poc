@@ -4,6 +4,7 @@
 // FICHE ÉLÈVE: mise à jour continue à chaque réponse (patch LLM) + exports.
 // Anti-duplication stricte des sous-questions. Cap par défaut = 4.
 // "Passer" : la question est oubliée définitivement (ne revient pas).
+// Exports: fiche (JSON), session (JSON: conversation + synthèse + récap), dernière page (PNG).
 
 (async function () {
   // ---- DOM ----
@@ -17,9 +18,8 @@
   const btnFinish = document.getElementById("btnFinish");
 
   const btnExportFiche = document.getElementById("btnExportFiche");
-  const btnExportConvRecap = document.getElementById("btnExportConvRecap");
-  const btnExportRecapPng = document.getElementById("btnExportRecapPng");
-  const btnExportRecapPdf = document.getElementById("btnExportRecapPdf");
+  const btnExportSession = document.getElementById("btnExportSession");
+  const btnExportLastPng = document.getElementById("btnExportLastPng");
 
   const btnReset = document.getElementById("btnReset");
   const btnSettings = document.getElementById("btnSettings"); // peut être null
@@ -52,7 +52,7 @@
     fiche: null,             // fiche élève (objet)
     attempts: {},            // nb de follow-ups par question (qid -> number)
     followups: {},           // follow-ups posés (qid -> string[])
-    skippedIds: [],          // NEW: liste des qid "oubliés" via Passer
+    skippedIds: [],          // liste des qid "oubliés" via Passer
     threadStart: 0,          // index history au début de la question courante
     timers: { questionStartMs: null },
     logs: []
@@ -355,68 +355,34 @@
     URL.revokeObjectURL(url);
   }
 
-  function exportConversationRecapJson() {
+  function exportSessionJson() {
     const payload = {
       app_version: window.APP_VERSION || "dev",
       exported_at: nowISO(),
       history: state.history,
+      summary: state.summary,
       recap: state.recap
     };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
     const stamp = new Date().toISOString().replace(/[:.]/g, "-");
     const url = URL.createObjectURL(blob);
-    const a = document.createElement("a"); a.href = url; a.download = `conversation-recap-${stamp}.json`; a.click();
+    const a = document.createElement("a"); a.href = url; a.download = `session-orientation-${stamp}.json`; a.click();
     URL.revokeObjectURL(url);
   }
 
-  async function exportRecapPng() {
-    const el = recapEl;
-    if (!el) return alert("Récap introuvable.");
-    const canvas = await html2canvas(el, { scale: 2, backgroundColor: null, useCORS: true });
+  async function exportLastPagePng() {
+    // Capture toute la "dernière page": Synthèse + Récap (section #summaryStage)
+    const el = summaryStage;
+    if (!el || el.classList.contains('hidden')) return alert("La page de synthèse n'est pas affichée.");
+    // S'assure que tout est visible
+    const canvas = await html2canvas(el, { scale: 2, backgroundColor: null, useCORS: true, windowWidth: el.scrollWidth, windowHeight: el.scrollHeight });
     canvas.toBlob((blob) => {
       if (!blob) return;
       const stamp = new Date().toISOString().replace(/[:.]/g, "-");
       const url = URL.createObjectURL(blob);
-      const a = document.createElement("a"); a.href = url; a.download = `recap-${stamp}.png`; a.click();
+      const a = document.createElement("a"); a.href = url; a.download = `derniere-page-${stamp}.png`; a.click();
       URL.revokeObjectURL(url);
     });
-  }
-
-  async function exportRecapPdf() {
-    const el = recapEl;
-    if (!el) return alert("Récap introuvable.");
-    const canvas = await html2canvas(el, { scale: 2, backgroundColor: "#ffffff" });
-    const imgData = canvas.toDataURL("image/png");
-    const { jsPDF } = window.jspdf;
-    const pdf = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" });
-    const pageWidth = pdf.internal.pageSize.getWidth();
-    const pageHeight = pdf.internal.pageSize.getHeight();
-    const imgWidth = pageWidth - 48; // marges
-    const imgHeight = (canvas.height * imgWidth) / canvas.width;
-
-    if (imgHeight < pageHeight - 48) {
-      pdf.addImage(imgData, "PNG", 24, 24, imgWidth, imgHeight, undefined, "FAST");
-    } else {
-      // découpage multi-pages si nécessaire
-      let remainHeight = imgHeight;
-      const pageCanvas = document.createElement("canvas");
-      const ctx = pageCanvas.getContext("2d");
-      pageCanvas.width = canvas.width;
-      pageCanvas.height = Math.floor((pageCanvas.width / imgWidth) * (pageHeight - 48));
-
-      let sY = 0;
-      while (remainHeight > 0) {
-        ctx.clearRect(0,0,pageCanvas.width,pageCanvas.height);
-        ctx.drawImage(canvas, 0, sY, canvas.width, pageCanvas.height, 0, 0, pageCanvas.width, pageCanvas.height);
-        const img = pageCanvas.toDataURL("image/png");
-        pdf.addImage(img, "PNG", 24, 24, imgWidth, pageHeight - 48, undefined, "FAST");
-        remainHeight -= (pageHeight - 48);
-        sY += pageCanvas.height;
-        if (remainHeight > 0) pdf.addPage();
-      }
-    }
-    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-    pdf.save(`recap-${stamp}.pdf`);
   }
 
   // ---- Handlers ----
@@ -607,9 +573,8 @@
   btnFinish.addEventListener("click", onFinish);
 
   btnExportFiche?.addEventListener("click", exportFicheJson);
-  btnExportConvRecap?.addEventListener("click", exportConversationRecapJson);
-  btnExportRecapPng?.addEventListener("click", exportRecapPng);
-  btnExportRecapPdf?.addEventListener("click", exportRecapPdf);
+  btnExportSession?.addEventListener("click", exportSessionJson);
+  btnExportLastPng?.addEventListener("click", exportLastPagePng);
 
   // ---- Bootstrap ----
   loadState();

@@ -32,7 +32,7 @@
   {
     "id": "q7",
     "text": "Souhaites-tu solliciter une bourse ?",
-    "hint": "Si 'Oui' ou 'Je ne sais pas', lui demander s'il connaît déjà des systèmes de bourse ? Si oui, pour quelles raisons principales (financement partiel/total, critères).",
+    "hint": "1 seule question supplémentaire : Si 'Oui' ou 'Je ne sais pas', lui demander s'il connaît déjà des systèmes de bourse.",
     "skip_revisit": true
   },
   {
