@@ -3,6 +3,7 @@
 // UI + encadrés + récap narratif (pas de phase de reprise).
 // FICHE ÉLÈVE: mise à jour continue à chaque réponse (patch LLM) + exports.
 // Anti-duplication stricte des sous-questions. Cap par défaut = 4.
+// "Passer" : la question est oubliée définitivement (ne revient pas).
 
 (async function () {
   // ---- DOM ----
@@ -48,10 +49,11 @@
     history: [],
     summary: null,
     recap: null,
-    fiche: null,              // fiche élève (objet)
-    attempts: {},             // nb de follow-ups posés par question (key = qid)
-    followups: {},            // follow-ups posés par question (key = qid) => string[]
-    threadStart: 0,           // index history au début de la question courante
+    fiche: null,             // fiche élève (objet)
+    attempts: {},            // nb de follow-ups par question (qid -> number)
+    followups: {},           // follow-ups posés (qid -> string[])
+    skippedIds: [],          // NEW: liste des qid "oubliés" via Passer
+    threadStart: 0,          // index history au début de la question courante
     timers: { questionStartMs: null },
     logs: []
   };
@@ -74,6 +76,26 @@
       // skip_revisit n'a plus d'effet (plus de reprise)
       skip_revisit: Boolean(q?.skip_revisit)
     };
+  }
+
+  // ---- Helpers skipped ----
+  const isSkipped = (qid) => Array.isArray(state.skippedIds) && state.skippedIds.includes(qid);
+  function markSkipped(qid) { if (!isSkipped(qid)) state.skippedIds.push(qid); saveState(); }
+
+  function advanceToNext() {
+    const total = state.questions.length;
+    let i = state.idx + 1;
+    while (i < total && isSkipped(state.questions[i].id)) i++;
+    state.idx = i;
+    saveState();
+  }
+
+  function positionOnFirstUnskipped() {
+    const total = state.questions.length;
+    let i = state.idx || 0;
+    while (i < total && isSkipped(state.questions[i].id)) i++;
+    state.idx = i;
+    saveState();
   }
 
   // ---- Helpers logique ----
@@ -232,6 +254,8 @@
     questionStage.classList.add("fade-in");
     setTimeout(() => questionStage.classList.remove("fade-in"), 400);
 
+    positionOnFirstUnskipped();
+
     const q = currentQuestion(); const qid = q.id;
     const label = questionLabel();
     logAssistant(label);
@@ -288,7 +312,7 @@
     }
   }
 
-  // ---- FINALISATION: encadrés + récap (pas de reprise) ----
+  // ---- FINALISATION: encadrés + récap ----
   async function finalizeSummary() {
     try {
       const sumStart = performance.now();
@@ -401,7 +425,11 @@
     if (!text) return;
     input.value = "";
 
+    positionOnFirstUnskipped();
     const q = currentQuestion();
+    if (!q) { // plus de questions → terminer
+      return onFinish();
+    }
 
     const responseMs = state.timers.questionStartMs ? (Date.now() - state.timers.questionStartMs) : null;
     logEvent({ event: "user_answer", qid: q?.id, qindex: state.idx, answer: text, response_ms: responseMs });
@@ -446,7 +474,7 @@
     }
 
     try {
-      // Phase principale
+      // Décision
       const qid = q.id;
       const attempts = state.attempts[qid] || 0;
       const previous_followups = state.followups[qid] || [];
@@ -479,7 +507,7 @@
       if (decision.answered === true) {
         state.attempts[qid] = 0; saveState();
         logEvent({ event: "next_question", from_qid: qid });
-        state.idx = Math.min(state.idx + 1, state.questions.length);
+        advanceToNext();
         if (state.idx < state.questions.length) await showCurrentQuestion(); else await onFinish();
       } else {
         const nextAttempts = attempts + 1;
@@ -494,7 +522,7 @@
         } else {
           state.attempts[qid] = 0; saveState();
           logEvent({ event: "advance_due_to_cap_or_model", qid, attempts: nextAttempts, cap: policy.max_followups });
-          state.idx = Math.min(state.idx + 1, state.questions.length);
+          advanceToNext();
           if (state.idx < state.questions.length) await showCurrentQuestion(); else await onFinish();
         }
       }
@@ -507,17 +535,23 @@
   }
 
   async function onSkip() {
+    // Marque la question courante comme "oubliée" définitivement
+    positionOnFirstUnskipped();
     const q = currentQuestion();
     if (q) {
+      markSkipped(q.id);
+      state.attempts[q.id] = 0;
+      state.followups[q.id] = [];
+      saveState();
       logEvent({ event: "skip_question", qid: q.id, text: q.text });
-      state.attempts[q.id] = 0; saveState();
     }
-    state.idx = Math.min(state.idx + 1, state.questions.length);
+    advanceToNext();
     if (state.idx < state.questions.length) await showCurrentQuestion(); else await onFinish();
   }
 
   async function onFinish() {
     logEvent({ event: "finish_clicked" });
+    // Quelle que soit l'étape, on finalise tout de suite
     return finalizeSummary();
   }
 
@@ -592,16 +626,16 @@
       const v = (window.APP_VERSION || Date.now());
       const res = await fetch(`./data/fiche_eleve.empty.json?v=${v}`);
       state.fiche = await res.json();
-      touchFicheCreated(); touchFicheUpdated(); saveState();
+      // init meta
+      if (!state.fiche.meta) state.fiche.meta = {};
+      if (!state.fiche.meta.created_at) state.fiche.meta.created_at = nowISO();
+      state.fiche.meta.updated_at = nowISO();
+      saveState();
     }
   } catch { alert("Impossible de charger data/fiche_eleve.empty.json"); return; }
 
-  // Si un ancien état contenait des champs de reprise, nettoie
-  delete state.unsatisfied;
-  delete state.revisitQueue;
-  delete state.currentRevisit;
-  delete state.phase;
-  saveState();
+  // Assure-toi d'être sur la 1re question non skippée
+  positionOnFirstUnskipped();
 
   const key = sessionStorage.getItem("OPENAI_KEY");
   const base = sessionStorage.getItem("OPENAI_BASE") || "https://api.openai.com/v1";
@@ -616,8 +650,14 @@
       summaryStage.classList.remove("hidden");
       if (state.recap) renderRecap(state.recap);
     } else {
-      const lastA = state.history.filter(h => h.role==="assistant").slice(-1)[0]?.content;
-      questionText.textContent = lastA || questionLabel();
+      const q = currentQuestion();
+      if (q) {
+        const lastA = state.history.filter(h => h.role==="assistant").slice(-1)[0]?.content;
+        questionText.textContent = lastA || questionLabel();
+      } else {
+        // aucune question à poser → finaliser
+        await finalizeSummary();
+      }
       setProgress();
     }
   } else {

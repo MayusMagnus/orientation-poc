@@ -7,7 +7,7 @@
   {
     "id": "q2",
     "text": "Qu’aimerais-tu apprendre ou découvrir en priorité (langue, culture, autonomie, métier) ? Classe-les par ordre d’importance si tu le peux.",
-    "hint": "Fais hiérarchiser (Top 3) et pourquoi le #1 est prioritaire."
+    "hint": "Fais hiérarchiser les envies de découvertes et pourquoi le #1 est prioritaire."
   },
   {
     "id": "q3",
@@ -26,8 +26,8 @@
   },
   {
     "id": "q6",
-    "text": "Quel type de séjour te correspond le mieux : études, stage, volontariat, job, séjour linguistique, césure ? Et pour combien de temps ?",
-    "hint": "Préciser durée (semaines/mois) et contexte idéal (campus, entreprise, ONG…)."
+    "text": "Quelle durée de séjour te convient le mieux ?",
+    "hint": "Préciser durée (semaines/mois) et contexte idéal (études, stage, volontariat, job, séjour linguistique, césure, campus, entreprise, ONG…)."
   },
   {
     "id": "q7",
