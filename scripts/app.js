@@ -41,6 +41,7 @@
   const welcomeStage = document.getElementById("welcomeStage");
   const summaryCards = document.getElementById("summaryCards");
   const recapEl = document.getElementById("recap");
+  const loadingStage = document.getElementById("loadingStage");
 
   // ---- State ----
   const state = {
@@ -114,6 +115,22 @@
   function logAssistant(text){ state.history.push({ role:"assistant", content:text }); saveState(); }
   function logUser(text){ state.history.push({ role:"user", content:text }); saveState(); }
   function setComposerEnabled(on) { input.disabled = !on; btnSend.disabled = !on; btnSkip.disabled = !on; btnFinish.disabled = !on; }
+
+  function showLoading(msg = "merci de bien vouloir patienter…") {
+    // cache tout le reste
+    welcomeStage.classList.add("hidden");
+    questionStage.classList.add("hidden");
+    summaryStage.classList.add("hidden");
+    // message
+    const p = loadingStage.querySelector(".loading-msg");
+    if (p) p.textContent = msg;
+    // affiche l'écran de chargement
+    loadingStage.classList.remove("hidden");
+  }
+
+  function hideLoading() {
+    loadingStage.classList.add("hidden");
+  }
 
   function swapQuestion(text) {
     return new Promise(resolve => {
@@ -315,6 +332,7 @@
   // ---- FINALISATION: encadrés + récap ----
   async function finalizeSummary() {
     try {
+      showLoading(); // affiche le logo + spinner pendant la synthèse (summarize + recap)
       const sumStart = performance.now();
       const sum = await window.Agent.summarize({ history: state.history, fiche: state.fiche });
       const sumMs = Math.round(performance.now() - sumStart);
@@ -329,6 +347,7 @@
 
       questionStage.classList.add("hidden");
       welcomeStage.classList.add("hidden");
+      hideLoading(); // retire l'écran de chargement juste avant d'afficher la synthèse
       summaryStage.classList.remove("hidden");
 
       logEvent({
@@ -338,6 +357,7 @@
         recap_lengths: Object.fromEntries(Object.entries(recap || {}).map(([k, v]) => [k, (v || "").length]))
       });
     } catch (e) {
+      hideLoading();
       alert(e.message || e);
       logEvent({ event: "error_finalizeSummary", message: String(e) });
     } finally {

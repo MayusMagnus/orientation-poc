@@ -137,3 +137,40 @@ dialog{border:none; border-radius:16px; padding:0; width:min(520px, 92%)}
 .fade-out{animation:fadeOut .35s ease forwards}
 @keyframes fadeIn{from{opacity:0; transform:translateY(8px)} to{opacity:1; transform:translateY(0)}}
 @keyframes fadeOut{from{opacity:1; transform:translateY(0)} to{opacity:0; transform:translateY(-8px)}}
+
+
+/* === LOADING SCREEN === */
+#loadingStage .loading-wrap {
+  min-height: 60vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  text-align: center;
+  color: #183040;
+}
+
+#loadingStage .logo-large {
+  width: 140px;
+  height: 140px;
+  object-fit: contain;
+  opacity: 0.95;
+}
+
+#loadingStage .loading-msg {
+  font-size: 1rem;
+  letter-spacing: 0.3px;
+  opacity: 0.9;
+}
+
+.spinner {
+  width: 56px;
+  height: 56px;
+  border: 4px solid rgba(0,0,0,.08);
+  border-top-color: #183040;
+  border-radius: 50%;
+  animation: spin 0.9s linear infinite;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
